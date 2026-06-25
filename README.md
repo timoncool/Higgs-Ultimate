@@ -494,11 +494,11 @@ audio.cpp already shows some genuinely exciting wins against the matching Python
 - Bars below the 1.0x line are useful too: they spotlight exactly where more optimization work is still worth doing.
 
 <p align="center">
-  <img src="assets/figure/perf_one_shot.svg?v=20260625-speedup" alt="One-shot" width="720" />
+  <img src="assets/figure/perf_one_shot_20260625.svg" alt="One-shot" width="720" />
 </p>
 
 <p align="center">
-  <img src="assets/figure/perf_long_lived_session.svg?v=20260625-speedup" alt="Long-lived session" width="720" />
+  <img src="assets/figure/perf_long_lived_session_20260625.svg" alt="Long-lived session" width="720" />
 </p>
 
 The figures report `Python wall time / audio.cpp wall time`. The 1.0x line means equal wall time; bars above 1.0x mean audio.cpp is faster than Python, and bars below 1.0x mean it is slower.
