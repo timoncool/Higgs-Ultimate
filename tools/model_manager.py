@@ -26,6 +26,7 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+MODEL_MANAGER_ASSETS = REPO_ROOT / "assets" / "model_manager"
 DEMUCS_ROOT_URL = "https://dl.fbaipublicfiles.com/demucs/"
 WHISPER_MEDIUM_PT_URL = (
     "https://openaipublic.azureedge.net/main/whisper/models/"
@@ -477,6 +478,213 @@ CATALOG: tuple[ModelPackage, ...] = (
             "model.safetensors",
         ),
         description="Installs MioTTS plus the sibling MioCodec dependency required by the framework runtime.",
+    ),
+    ModelPackage(
+        id="vibevoice_1_5b",
+        display_name="VibeVoice 1.5B",
+        target_directory="VibeVoice-1.5B",
+        source=CompositeSnapshotSource(
+            placements=(
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="microsoft/VibeVoice-1.5B"),
+                    required_files=(
+                        "config.json",
+                        "model.safetensors.index.json",
+                        "model-00001-of-00003.safetensors",
+                        "model-00002-of-00003.safetensors",
+                        "model-00003-of-00003.safetensors",
+                        "preprocessor_config.json",
+                    ),
+                ),
+            ),
+        ),
+        required_files=(
+            "config.json",
+            "model.safetensors.index.json",
+            "model-00001-of-00003.safetensors",
+            "model-00002-of-00003.safetensors",
+            "model-00003-of-00003.safetensors",
+            "preprocessor_config.json",
+            "tokenizer.json",
+            "tokenizer_config.json",
+            "vocab.json",
+            "merges.txt",
+        ),
+    ),
+    ModelPackage(
+        id="higgs_audio_v3_tts_4b",
+        display_name="Higgs Audio v3 TTS 4B",
+        target_directory="higgs-audio-v3-tts-4b",
+        source=SnapshotSource(repo_id="bosonai/higgs-audio-v3-tts-4b"),
+        required_files=(
+            "chat_template.jinja",
+            "config.json",
+            "model.safetensors.index.json",
+            "model.safetensors",
+            "tokenizer.json",
+            "tokenizer_config.json",
+        ),
+    ),
+    ModelPackage(
+        id="heartmula",
+        display_name="HeartMuLa",
+        target_directory="HeartMuLa",
+        source=CompositeSnapshotSource(
+            placements=(
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="HeartMuLa/HeartMuLaGen"),
+                    required_files=("gen_config.json", "tokenizer.json"),
+                ),
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="HeartMuLa/HeartMuLa-oss-3B"),
+                    target_subdir="HeartMuLa-oss-3B",
+                    required_files=(
+                        "config.json",
+                        "model.safetensors.index.json",
+                        "model-00001-of-00004.safetensors",
+                        "model-00002-of-00004.safetensors",
+                        "model-00003-of-00004.safetensors",
+                        "model-00004-of-00004.safetensors",
+                    ),
+                ),
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="HeartMuLa/HeartCodec-oss-20260123"),
+                    target_subdir="HeartCodec-oss",
+                    required_files=(
+                        "config.json",
+                        "model.safetensors.index.json",
+                        "model-00001-of-00002.safetensors",
+                        "model-00002-of-00002.safetensors",
+                    ),
+                ),
+            ),
+        ),
+        required_files=(
+            "tokenizer.json",
+            "gen_config.json",
+            "HeartMuLa-oss-3B/config.json",
+            "HeartMuLa-oss-3B/model.safetensors.index.json",
+            "HeartMuLa-oss-3B/model-00001-of-00004.safetensors",
+            "HeartMuLa-oss-3B/model-00002-of-00004.safetensors",
+            "HeartMuLa-oss-3B/model-00003-of-00004.safetensors",
+            "HeartMuLa-oss-3B/model-00004-of-00004.safetensors",
+            "HeartCodec-oss/config.json",
+            "HeartCodec-oss/model.safetensors.index.json",
+            "HeartCodec-oss/model-00001-of-00002.safetensors",
+            "HeartCodec-oss/model-00002-of-00002.safetensors",
+        ),
+    ),
+    ModelPackage(
+        id="irodori_tts_500m_v3",
+        display_name="Irodori-TTS 500M v3",
+        target_directory="Irodori-TTS-500M-v3",
+        source=CompositeSnapshotSource(
+            placements=(
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="Aratako/Irodori-TTS-500M-v3"),
+                    required_files=("model.safetensors",),
+                ),
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="llm-jp/llm-jp-3-150m"),
+                    target_subdir="../llm-jp-3-150m",
+                    required_files=("tokenizer.json", "model.safetensors", "config.json"),
+                ),
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="Aratako/Semantic-DACVAE-Japanese-32dim"),
+                    target_subdir="../Semantic-DACVAE-Japanese-32dim",
+                    required_files=("weights.pth",),
+                ),
+            ),
+        ),
+        required_files=(
+            "model.safetensors",
+            "../llm-jp-3-150m/tokenizer.json",
+            "../Semantic-DACVAE-Japanese-32dim/weights.safetensors",
+        ),
+        description="Installs Irodori-TTS plus the sibling llm-jp tokenizer and DACVAE codec dependencies required by the framework runtime.",
+    ),
+    ModelPackage(
+        id="irodori_tts_600m_v3_voice_design",
+        display_name="Irodori-TTS 600M v3 VoiceDesign",
+        target_directory="Irodori-TTS-600M-v3-VoiceDesign",
+        source=CompositeSnapshotSource(
+            placements=(
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="Aratako/Irodori-TTS-600M-v3-VoiceDesign"),
+                    required_files=("model.safetensors",),
+                ),
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="llm-jp/llm-jp-3-150m"),
+                    target_subdir="../llm-jp-3-150m",
+                    required_files=("tokenizer.json", "model.safetensors", "config.json"),
+                ),
+                SnapshotPlacement(
+                    source=SnapshotSource(repo_id="Aratako/Semantic-DACVAE-Japanese-32dim"),
+                    target_subdir="../Semantic-DACVAE-Japanese-32dim",
+                    required_files=("weights.pth",),
+                ),
+            ),
+        ),
+        required_files=(
+            "model.safetensors",
+            "../llm-jp-3-150m/tokenizer.json",
+            "../Semantic-DACVAE-Japanese-32dim/weights.safetensors",
+        ),
+        description="Installs Irodori-TTS VoiceDesign plus the sibling llm-jp tokenizer and DACVAE codec dependencies required by the framework runtime.",
+    ),
+    ModelPackage(
+        id="stable_audio_3_small_music",
+        display_name="Stable Audio 3 Small Music",
+        target_directory="stable-audio-3-small-music",
+        source=SnapshotSource(repo_id="stabilityai/stable-audio-3-small-music"),
+        required_files=(
+            "model_config.json",
+            "model.safetensors",
+            "t5gemma-b-b-ul2/config.json",
+            "t5gemma-b-b-ul2/model.safetensors",
+            "t5gemma-b-b-ul2/tokenizer.json",
+            "t5gemma-b-b-ul2/tokenizer.model",
+        ),
+    ),
+    ModelPackage(
+        id="stable_audio_3_small_sfx",
+        display_name="Stable Audio 3 Small SFX",
+        target_directory="stable-audio-3-small-sfx",
+        source=SnapshotSource(repo_id="stabilityai/stable-audio-3-small-sfx"),
+        required_files=(
+            "model_config.json",
+            "model.safetensors",
+            "t5gemma-b-b-ul2/config.json",
+            "t5gemma-b-b-ul2/model.safetensors",
+            "t5gemma-b-b-ul2/tokenizer.json",
+            "t5gemma-b-b-ul2/tokenizer.model",
+        ),
+    ),
+    ModelPackage(
+        id="stable_audio_3_medium",
+        display_name="Stable Audio 3 Medium",
+        target_directory="stable-audio-3-medium",
+        source=SnapshotSource(repo_id="stabilityai/stable-audio-3-medium"),
+        required_files=(
+            "model_config.json",
+            "model.safetensors",
+            "t5gemma-b-b-ul2/config.json",
+            "t5gemma-b-b-ul2/model.safetensors",
+            "t5gemma-b-b-ul2/tokenizer.json",
+            "t5gemma-b-b-ul2/tokenizer.model",
+        ),
+    ),
+    ModelPackage(
+        id="supertonic_3",
+        display_name="Supertonic 3",
+        target_directory="supertonic-3",
+        source=SnapshotSource(repo_id="mlx-community/supertonic-3-mlx"),
+        required_files=(
+            "config/tts.json",
+            "config/unicode_indexer.json",
+            "ggml/supertonic.safetensors",
+            "voice_styles/M1.json",
+        ),
     ),
     ModelPackage(
         id="mel_band_roformer",
@@ -1011,6 +1219,25 @@ def convert_ace_step_silence_latent(root: Path) -> None:
     write_checked_safetensors({"silence_latent": tensor.detach().cpu().contiguous()}, output_path, input_path, overwrite=True)
 
 
+def convert_irodori_dacvae_weights(root: Path) -> None:
+    input_path = root / "weights.pth"
+    output_path = root / "weights.safetensors"
+    payload = torch.load(input_path, map_location="cpu", weights_only=True)
+    state = checkpoint_state_dict(payload)
+    tensors = tensor_state_dict(state)
+    write_checked_safetensors(tensors, output_path, input_path, overwrite=True)
+
+
+def copy_bundled_model_manager_assets(asset_subdir: str, destination_root: Path, required_files: Iterable[str]) -> None:
+    source_root = MODEL_MANAGER_ASSETS / asset_subdir
+    validate_required_files_list(required_files, source_root, f"bundled model-manager assets {asset_subdir}")
+    for relative in required_files:
+        source_path = source_root / relative
+        destination_path = destination_root / relative
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, destination_path)
+
+
 def install_snapshot(package: ModelPackage, source: SnapshotSource, models_root: Path, overwrite: bool) -> Path:
     target_dir = models_root / package.target_directory
     staging_root = models_root / ".engine_model_staging"
@@ -1076,6 +1303,14 @@ def install_composite_snapshot(
             convert_ace_step_silence_latent(staged_package_root / "acestep-v15-base")
         elif package.id == "moss_tts":
             convert_moss_tts_weights(staged_package_root)
+        elif package.id in {"irodori_tts_500m_v3", "irodori_tts_600m_v3_voice_design"}:
+            convert_irodori_dacvae_weights(staged_package_root.parent / "Semantic-DACVAE-Japanese-32dim")
+        elif package.id == "vibevoice_1_5b":
+            copy_bundled_model_manager_assets(
+                "vibevoice_1_5b",
+                staged_package_root,
+                ("tokenizer.json", "tokenizer_config.json", "vocab.json", "merges.txt"),
+            )
         validate_required_files(package, staged_package_root)
 
         top_level_roots: list[Path] = []

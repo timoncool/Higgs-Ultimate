@@ -142,8 +142,24 @@ def maybe_absolute_path(value: Any) -> Any:
     return value
 
 
+def maybe_absolute_path_list(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    parts = [item.strip() for item in value.split(",")]
+    if not parts:
+        return value
+    return ",".join(str(maybe_absolute_path(item)) for item in parts if item)
+
+
 def materialize_request_paths(request: dict[str, Any]) -> dict[str, Any]:
     out = dict(request)
+    if "text_file" in out:
+        text_path = Path(maybe_absolute_path(out.pop("text_file")))
+        text = text_path.read_text(encoding="utf-8")
+        repeat = int(out.pop("text_repeat", 1))
+        if repeat <= 0:
+            raise RuntimeError("text_repeat must be positive")
+        out["text"] = "\n".join(text.strip() for _ in range(repeat))
     for key in ("audio", "voice_ref", "source_audio", "target_voice", "prosody_ref", "style_ref"):
         if key in out:
             out[key] = maybe_absolute_path(out[key])
@@ -152,6 +168,8 @@ def materialize_request_paths(request: dict[str, Any]) -> dict[str, Any]:
         for key, value in options.items():
             if key.endswith("_path") or key.endswith("_file") or key.endswith(".path") or key.endswith(".file"):
                 options[key] = maybe_absolute_path(value)
+            elif key in {"voice_samples", "vibevoice.voice_samples"}:
+                options[key] = maybe_absolute_path_list(value)
         out["options"] = options
     return out
 

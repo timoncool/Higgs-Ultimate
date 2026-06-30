@@ -2467,6 +2467,8 @@ static bool ggml_cuda_should_fuse_mul_mat_vec_f(const ggml_tensor * tensor) {
     ggml_tensor *       src1 = tensor->src[1];
     const ggml_tensor * dst  = tensor;
 
+    const bool is_mul_mat = tensor->op == GGML_OP_MUL_MAT ||
+                            tensor->op == GGML_OP_MUL_MAT_PACK4;
     const bool is_mul_mat_id = tensor->op == GGML_OP_MUL_MAT_ID;
 
     bool use_mul_mat_vec_f =
@@ -2485,7 +2487,7 @@ static bool ggml_cuda_should_fuse_mul_mat_vec_f(const ggml_tensor * tensor) {
     }
 
     //we only support fusion for ncols_dst = 1
-    if (tensor->op == GGML_OP_MUL_MAT && dst->ne[1] != 1) {
+    if (is_mul_mat && dst->ne[1] != 1) {
         return false;
     }
 
@@ -2515,7 +2517,8 @@ static bool ggml_cuda_should_fuse_mul_mat_vec_q(const ggml_tensor * tensor) {
         return false;
     }
     //we only support fusion for ncols_dst = 1
-    if (tensor->op == GGML_OP_MUL_MAT && dst->ne[1] != 1) {
+    if ((tensor->op == GGML_OP_MUL_MAT ||
+         tensor->op == GGML_OP_MUL_MAT_PACK4) && dst->ne[1] != 1) {
         return false;
     }
 
@@ -2968,6 +2971,7 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
             ggml_cuda_op_rms_norm_back(ctx, dst);
             break;
         case GGML_OP_MUL_MAT:
+        case GGML_OP_MUL_MAT_PACK4:
             ggml_cuda_mul_mat(ctx, dst->src[0], dst->src[1], dst);
             break;
         case GGML_OP_MUL_MAT_ID:
@@ -5054,7 +5058,7 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
     ggml_backend_cuda_device_context * dev_ctx = (ggml_backend_cuda_device_context *) dev->context;
 
     // split buffers can only be used with GGML_OP_MUL_MAT
-    if (op->op != GGML_OP_MUL_MAT) {
+    if (op->op != GGML_OP_MUL_MAT && op->op != GGML_OP_MUL_MAT_PACK4) {
         for (int i = 0; i < GGML_MAX_SRC; i++) {
             if (op->src[i] && op->src[i]->buffer && ggml_backend_buft_is_cuda_split(op->src[i]->buffer->buft)) {
                 return false;
@@ -5118,6 +5122,7 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
             }
             break;
         case GGML_OP_MUL_MAT:
+        case GGML_OP_MUL_MAT_PACK4:
         case GGML_OP_MUL_MAT_ID:
             {
                 struct ggml_tensor * a = op->src[0];
@@ -5454,6 +5459,7 @@ static int64_t get_op_batch_size(const ggml_tensor * op) {
         case GGML_OP_GET_ROWS:
             return 0;
         case GGML_OP_MUL_MAT:
+        case GGML_OP_MUL_MAT_PACK4:
             return op->ne[1];
         case GGML_OP_MUL_MAT_ID:
         case GGML_OP_ROPE:

@@ -845,6 +845,7 @@ static struct ggml_backend_meta_split_state ggml_backend_meta_get_split_state(co
                 split_state = handle_per_row(src_ss);
             } break;
             case GGML_OP_MUL_MAT:
+            case GGML_OP_MUL_MAT_PACK4:
             case GGML_OP_MUL_MAT_ID: {
                 split_state = handle_mul_mat(src_ss);
             } break;

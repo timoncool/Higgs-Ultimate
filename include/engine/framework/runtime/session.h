@@ -19,6 +19,7 @@ enum class VoiceTaskKind {
     Asr,
     Diarization,
     SourceSeparation,
+    AudioGeneration,
     Tts,
     VoiceCloning,
     VoiceConversion,

@@ -5,7 +5,7 @@
       "coverage": "ACE-Step turbo text2music, planner, DiT, long VAE decode chunking, then shorter request in the same session",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "session_options": {
         "ace_step.weight_type": "f32"
@@ -53,7 +53,7 @@
       "coverage": "ACE-Step base CFG text2music route",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "load_options": {
         "ace_step.dit_model_path": "acestep-v15-base",
@@ -90,7 +90,7 @@
       "coverage": "ACE-Step base complete route with source audio",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "load_options": {
         "ace_step.dit_model_path": "acestep-v15-base",
@@ -125,7 +125,7 @@
       "coverage": "ACE-Step base lego route with piano source audio",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "load_options": {
         "ace_step.dit_model_path": "acestep-v15-base",
@@ -161,7 +161,7 @@
       "coverage": "ACE-Step base extract vocal route",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "load_options": {
         "ace_step.dit_model_path": "acestep-v15-base",
@@ -198,7 +198,7 @@
       "coverage": "ACE-Step base cover-nofsq route",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "load_options": {
         "ace_step.dit_model_path": "acestep-v15-base",
@@ -233,7 +233,7 @@
       "coverage": "ACE-Step base repaint route with source audio splice",
       "family": "ace_step",
       "model": "models/Ace-Step1.5",
-      "task": "tts",
+      "task": "gen",
       "mode": "offline",
       "load_options": {
         "ace_step.dit_model_path": "acestep-v15-base",
@@ -482,6 +482,336 @@
           "seed": 1234,
           "max_tokens": 0,
           "guidance_scale": 2.0,
+          "num_inference_steps": 10
+        }
+      ]
+    },
+    {
+      "id": "higgs_tts_voice_clone_chunked",
+      "coverage": "Higgs Audio v3 voice clone path with framework text chunking, AR generation, and codec decode",
+      "family": "higgs_tts",
+      "model": "models/higgs-audio-v3-tts-4b",
+      "task": "tts",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "clone_chunked",
+          "text": "The first Higgs chunk checks that the reference voice remains stable through a normal sentence. The second chunk confirms that the framework splitter can continue the same request without changing the speaker. The final chunk gives the reviewer an easy ending phrase to inspect in the merged audio.",
+          "voice_ref": "resources/sample.wav",
+          "reference_text": "Some call me nature. Others call me Mother Nature. I've been here for over 4.5 billion years. 22,500 times longer than you.",
+          "seed": 1234,
+          "temperature": 1.0,
+          "top_p": 0.95,
+          "top_k": 50
+        }
+      ]
+    },
+    {
+      "id": "higgs_tts_voice_clone_cache_pollution",
+      "coverage": "Higgs Audio v3 long-lived session cache pollution check with short, long, medium, and long requests",
+      "family": "higgs_tts",
+      "model": "models/higgs-audio-v3-tts-4b",
+      "task": "tts",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "warmup_short",
+          "text": "A short warmup checks the cloned voice before the run.",
+          "voice_ref": "resources/sample.wav",
+          "reference_text": "This little work was finished in the year eighteen o three, and intended for immediate publication.",
+          "seed": 1234
+        },
+        {
+          "id": "long_first",
+          "text": "The harbor archive opened before sunrise while the night watchman still carried his lantern across the wet stone courtyard. A clerk in a green coat unlocked the east room, counted the incoming ledgers, and read aloud the schedule for boats arriving from the orchard towns. Near the fountain, two painters argued gently about the color of the morning clouds, a baker delivered rye bread to the station kitchen, and a violin teacher asked three students to repeat a bright phrase until every note sounded steady. By midmorning the telegraph operator copied a report about calm weather, the ferry captain checked the brass bell, and a group of travelers compared tickets beside a stack of blue trunks. The clerk wrote that the town remained orderly, the river moved slowly under the bridge, and every worker seemed ready for another careful day of letters, freight, music, maps, and patient conversation.",
+          "voice_ref": "resources/sample.wav",
+          "reference_text": "This little work was finished in the year eighteen o three, and intended for immediate publication.",
+          "seed": 1234
+        },
+        {
+          "id": "medium_after_long",
+          "text": "At noon the same clerk closed one ledger and opened another. She recorded a basket of pears, a silver watch, two parcels of glass, and a folded map that had been returned by a quiet traveler. Outside the station, children crossed the square in pairs while the tram driver polished the handle of the door. The short report ended with a note that the tide was low, the west platform was clean, and the lighthouse keeper had sent no warning for the afternoon crossing.",
+          "voice_ref": "resources/sample.wav",
+          "reference_text": "This little work was finished in the year eighteen o three, and intended for immediate publication.",
+          "seed": 1234
+        },
+        {
+          "id": "long_second",
+          "text": "Evening brought a different rhythm to the harbor station as lamps brightened along the quay and the last sunlight slid from the warehouse roofs. A customs officer inspected a crate of painted cups, a mechanic tightened a tram hinge, and a florist carried pale lilies toward the hotel veranda. The clerk listened to the bell tower, then added a final page describing the sound of boots on the platform, ropes moving against wooden posts, and distant engines beyond the river bend. Travelers gathered under the awning to ask about the morning ferry, while a choir director folded sheet music beside the ticket window and promised to return after breakfast. Before midnight the watchman tested each lock, the baker collected empty trays from the kitchen, and the clerk wrote that the town had kept its balance through another day of weather, errands, careful voices, and small dependable signs of work.",
+          "voice_ref": "resources/sample.wav",
+          "reference_text": "This little work was finished in the year eighteen o three, and intended for immediate publication.",
+          "seed": 1234
+        }
+      ]
+    },
+    {
+      "id": "heartmula_music_generation",
+      "coverage": "HeartMuLa text-to-music generation using native model weight types and the warmbench reference request",
+      "family": "heartmula",
+      "model": "models/HeartMuLa",
+      "task": "gen",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "warmbench_default",
+          "text": "[Intro]\n\n[Verse]\nThe sun creeps in across the floor\nI hear the traffic outside the door\nThe coffee pot begins to hiss\nIt is another morning just like this\n\n[Prechorus]\nThe world keeps spinning round and round\nFeet are planted on the ground\nI find my rhythm in the sound\n\n[Chorus]\nEvery day the light returns\nEvery day the fire burns\nWe keep on walking down this street\nMoving to the same steady beat\nIt is the ordinary magic that we meet\n\n[Verse]\nThe hours tick deeply into noon\nChasing shadows, chasing the moon\nWork is done and the lights go low\nWatching the city start to glow\n\n[Bridge]\nIt is not always easy, not always bright\nSometimes we wrestle with the night\nBut we make it to the morning light\n\n[Chorus]\nEvery day the light returns\nEvery day the fire burns\nWe keep on walking down this street\nMoving to the same steady beat\n\n[Outro]\nJust another day\nEvery single day\n",
+          "duration_seconds": 60,
+          "temperature": 1.0,
+          "top_k": 50,
+          "guidance_scale": 1.5,
+          "num_inference_steps": 10,
+          "seed": 1234,
+          "options": {
+            "tags": "piano,happy,pop,indie-pop,warm,female-vocal,medium-tempo",
+            "codec_duration": 29.76,
+            "codec_guidance_scale": 1.25
+          }
+        }
+      ]
+    },
+    {
+      "id": "irodori_tts_500m_emoji_style_clone",
+      "coverage": "Irodori-TTS 500M no-reference emoji/style requests and reference clone path in one session",
+      "family": "irodori_tts",
+      "model": "models/Irodori-TTS-500M-v3",
+      "task": "tts",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "short_emoji",
+          "text": "今日は短い確認です。😊やさしく、聞き取りやすい声でお願いします。",
+          "language": "ja",
+          "seed": 1234,
+          "num_inference_steps": 40,
+          "options": {
+            "no_ref": true
+          }
+        },
+        {
+          "id": "style_sound",
+          "text": "📞お電話ありがとうございます。少しお待ちください。⏸️ただいま担当者へおつなぎします。",
+          "language": "ja",
+          "seed": 1234,
+          "num_inference_steps": 40,
+          "options": {
+            "no_ref": true
+          }
+        },
+        {
+          "id": "clone_reference",
+          "text": "この声の雰囲気を保ったまま、落ち着いて自然に読み上げます。",
+          "language": "ja",
+          "voice_ref": "resources/sample.wav",
+          "seed": 1234,
+          "num_inference_steps": 40,
+          "options": {
+            "no_ref": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "irodori_tts_600m_voice_design_caption",
+      "coverage": "Irodori-TTS 600M voice-design caption conditioning with no-reference and reference-conditioned emoji requests",
+      "family": "irodori_tts",
+      "model": "models/Irodori-TTS-600M-v3-VoiceDesign",
+      "task": "vdes",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "voice_design_caption",
+          "text": "本日はお越しいただき、誠にありがとうございます。どうぞごゆっくりお過ごしください。",
+          "language": "ja",
+          "seed": 1234,
+          "num_inference_steps": 40,
+          "options": {
+            "caption": "落ち着いた大人の男性。フォーマルな場で、深く響く声で丁寧かつ歓迎の意を込めて話している。",
+            "no_ref": true
+          }
+        },
+        {
+          "id": "voice_design_ref_caption_emoji",
+          "text": "あははっ🤭、それ本当に言ってるの？…😮‍💨まぁ、君らしいけどね。",
+          "language": "ja",
+          "voice_ref": "models/Irodori-TTS-600M-v3-VoiceDesign/samples/clone_ref2.wav",
+          "seed": 1234,
+          "num_inference_steps": 40,
+          "options": {
+            "caption": "余裕のある大人の男性。親しい相手に対して、くだけた雰囲気で呆れながらも楽しそうに話している。",
+            "no_ref": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "stable_audio_music_text",
+      "coverage": "Stable Audio 3 small-music text-to-music path",
+      "family": "stable_audio",
+      "model": "models/stable-audio-3-small-music",
+      "task": "gen",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "music_text",
+          "text": "House music that encapsulates the feeling of being at a festival in the sunny weather with all your friends 124 BPM",
+          "language": "en",
+          "duration_seconds": 120.0,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "seed": 1234
+        }
+      ]
+    },
+    {
+      "id": "stable_audio_music_init_audio",
+      "coverage": "Stable Audio 3 small-music init-audio path",
+      "family": "stable_audio",
+      "model": "models/stable-audio-3-small-music",
+      "task": "gen",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "music_init_audio",
+          "text": "Transform the reference into a mellow downtempo track with deeper bass, brushed hats, and wide room ambience",
+          "language": "en",
+          "audio": "resources/mel_roformer_test_10s.wav",
+          "duration_seconds": 10.0,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "seed": 1246,
+          "options": {
+            "negative_prompt": "poor quality, distorted, clipped, noisy",
+            "audio_input_kind": "init_audio",
+            "init_noise_level": 0.45
+          }
+        }
+      ]
+    },
+    {
+      "id": "stable_audio_music_inpaint_audio",
+      "coverage": "Stable Audio 3 small-music inpaint-audio path with mask regions",
+      "family": "stable_audio",
+      "model": "models/stable-audio-3-small-music",
+      "task": "gen",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "music_inpaint_audio",
+          "text": "Replace only the masked sections with a tight snare fill and bright guitar swell while preserving the surrounding acoustic verse",
+          "language": "en",
+          "audio": "resources/mel_roformer_test_10s.wav",
+          "duration_seconds": 10.0,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "seed": 1248,
+          "options": {
+            "negative_prompt": "poor quality, distorted, clipped, noisy",
+            "audio_input_kind": "inpaint_audio",
+            "inpaint_mask_start_seconds": "2.5,6.5",
+            "inpaint_mask_end_seconds": "3.5,8.0"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stable_audio_sfx_text",
+      "coverage": "Stable Audio 3 small-sfx text-to-sound path",
+      "family": "stable_audio",
+      "model": "models/stable-audio-3-small-sfx",
+      "task": "gen",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "sfx_text",
+          "text": "Footsteps on gravel, steady walking pace, close perspective, crisp natural stone texture. Length: 8 seconds",
+          "language": "en",
+          "duration_seconds": 8.0,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "seed": 1235
+        }
+      ]
+    },
+    {
+      "id": "stable_audio_medium_text",
+      "coverage": "Stable Audio 3 medium text-to-music path with chunked decode",
+      "family": "stable_audio",
+      "model": "models/stable-audio-3-medium",
+      "task": "gen",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "medium_text",
+          "text": "An anthemic Pop Rock instrumental that fills your head with nostalgic thoughtfulness",
+          "language": "en",
+          "duration_seconds": 30.0,
+          "num_inference_steps": 8,
+          "guidance_scale": 1.0,
+          "seed": 1236,
+          "options": {
+            "negative_prompt": "poor quality",
+            "chunked_decode": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "supertonic_tts_voice_presets",
+      "coverage": "Supertonic TTS preset voice styles and shared generation options in one session",
+      "family": "supertonic",
+      "model": "models/supertonic-3",
+      "task": "tts",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "male_voice",
+          "text": "Supertonic path testing confirms the male preset voice with stable timing and clear speech.",
+          "language": "en",
+          "voice_id": "M1",
+          "speaking_rate": 1.05,
+          "seed": 1234,
+          "num_inference_steps": 10
+        },
+        {
+          "id": "female_voice",
+          "text": "The second request keeps the same session alive while switching to the female preset voice.",
+          "language": "en",
+          "voice_id": "F1",
+          "speaking_rate": 1.05,
+          "seed": 1234,
           "num_inference_steps": 10
         }
       ]
@@ -922,6 +1252,29 @@
           "seed": 1234,
           "max_tokens": 120,
           "do_sample": false
+        }
+      ]
+    },
+    {
+      "id": "vibevoice_two_speaker_long",
+      "coverage": "VibeVoice 1.5B long two-speaker TTS with reference voices",
+      "family": "vibevoice",
+      "model": "models/VibeVoice-1.5B",
+      "task": "tts",
+      "mode": "offline",
+      "outputs": [
+        "audio"
+      ],
+      "requests": [
+        {
+          "id": "long_two_speaker_research_vessel",
+          "text": "Speaker 1: When the overnight rain finally stopped, the research vessel was already easing away from the pier. I kept one hand on the rail and watched the city shrink behind us, because the whole morning felt like a test of patience: the weather station was late, the tide report had two conflicting numbers, and half the crew wanted to wait for clearer skies. But the acoustic buoys were drifting out of range, and if we missed this window we would lose the cleanest recording week of the season.\nSpeaker 2: I remember that departure differently. From the engine room it sounded less dramatic and more like a checklist finally doing its job. The generators were stable, the satellite link came up on the second attempt, and the spare hydrophone array passed its self test after I reseated one stubborn connector. What mattered to me was not whether the sky looked friendly, but whether every system could keep running once the waves started pushing against us.\nSpeaker 1: By noon the fog lifted enough to reveal a line of gulls circling over the shoals, and the first buoy came into view. We cut the engines, lowered the deck noise, and listened. There was a low mechanical hum from somewhere far north, a pattern of clicks that might have been dolphins, and beneath it all a slow pulse from the mooring chain. It was not a clean recording yet, but it was alive in the way field data always is: messy, specific, and stubbornly real.\nSpeaker 2: That is why I like this test case. It has narration, technical phrasing, turn taking, and enough duration to expose whether the model can hold two voices without collapsing into a short greeting. If the output sounds natural, we know the path is exercising actual long-form synthesis instead of merely proving that a checkpoint can make a few seconds of noise.",
+          "num_inference_steps": 20,
+          "guidance_scale": 1.3,
+          "seed": 1234,
+          "options": {
+            "voice_samples": "reference/VibeVoiceCommunity/demo/voices/en-Alice_woman.wav,reference/VibeVoiceCommunity/demo/voices/en-Frank_man.wav"
+          }
         }
       ]
     },

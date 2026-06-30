@@ -97,6 +97,8 @@ const char * to_string(VoiceTaskKind task) noexcept {
         return "diar";
     case VoiceTaskKind::SourceSeparation:
         return "sep";
+    case VoiceTaskKind::AudioGeneration:
+        return "gen";
     case VoiceTaskKind::Tts:
         return "tts";
     case VoiceTaskKind::VoiceCloning:
@@ -163,6 +165,9 @@ VoiceTaskKind parse_voice_task_kind(const std::string & value) {
     if (value == "sep") {
         return VoiceTaskKind::SourceSeparation;
     }
+    if (value == "gen") {
+        return VoiceTaskKind::AudioGeneration;
+    }
     if (value == "tts") {
         return VoiceTaskKind::Tts;
     }
@@ -187,7 +192,7 @@ VoiceTaskKind parse_voice_task_kind(const std::string & value) {
     if (value == "svc") {
         return VoiceTaskKind::Svc;
     }
-    throw std::runtime_error("unsupported task: " + value + " (expected vad, asr, diar, sep, tts, clon, vc, s2s, align, vdes, spk, or svc)");
+    throw std::runtime_error("unsupported task: " + value + " (expected vad, asr, diar, sep, gen, tts, clon, vc, s2s, align, vdes, spk, or svc)");
 }
 
 RunMode parse_run_mode(const std::string & value) {

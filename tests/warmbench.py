@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import array
+import hashlib
 import json
 import os
 import random
@@ -17,6 +18,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+ACE_STEP_BASELINE_CPP_AUDIO = REPO_ROOT / "build/logs/warmbench/ace_step_20s_baseline/ace_step_offline_cuda/cpp_audio/audio_0.wav"
 PYTHON_EXE = sys.executable
 WHISPER_CONDA_ENV = "qwen3-tts"
 WHISPER_MODEL = "tiny.en"
@@ -62,6 +64,18 @@ CJK_ASR_TRANSLATION = str.maketrans({
 })
 
 FAMILY_CONFIG: dict[str, dict[str, Any]] = {
+    "kokoro": {
+        "kind": "tts",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/kokoro_tts_warm_bench",
+        "python_script": "tests/kokoro_tts/kokoro_tts_python_warm_bench.py",
+        "model": "models/kokoro-82m-v1_0-ggml",
+        "case_catalog": "tests/kokoro_tts/kokoro_tts_warm_bench_cases.txt",
+        "voice_id": "af_heart",
+        "speaking_rate": 1.0,
+        "max_input_tokens": 512,
+        "min_text_length": 65,
+    },
     "pocket_tts": {
         "kind": "tts",
         "modes": ["offline"],
@@ -167,6 +181,56 @@ FAMILY_CONFIG: dict[str, dict[str, Any]] = {
         "case_catalog": "tests/omnivoice/omnivoice_warm_bench_cases.json",
         "default_case_name": "default",
     },
+    "mel_band_roformer": {
+        "kind": "separation",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/roformer_warm_bench",
+        "python_script": "tests/roformer/roformer_python_warm_bench.py",
+        "model": "models/mel-roformer-mlx",
+        "python_model": "models/melbandroformer/MelBandRoformer.ckpt",
+        "python_config": "reference/Mel-Band-Roformer-Vocal-Model/configs/config_vocals_mel_band_roformer.yaml",
+        "case_catalog": "tests/roformer/roformer_warm_bench_cases.json",
+        "default_case_name": "default",
+    },
+    "htdemucs": {
+        "kind": "separation",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/demucs_warm_bench",
+        "python_script": "tests/demucs/demucs_python_warm_bench.py",
+        "model": "models/htdemucs",
+        "python_model": "models/htdemucs",
+        "python_name": "htdemucs",
+        "case_catalog": "tests/demucs/demucs_warm_bench_cases.json",
+        "default_case_name": "default",
+    },
+    "moss_tts": {
+        "kind": "tts",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/moss_tts_warm_bench",
+        "python_script": "tests/moss_tts/moss_tts_python_warm_bench.py",
+        "model": "models/MOSS-TTS-Nano-100M",
+        "audio_tokenizer_model": "models/MOSS-Audio-Tokenizer-Nano",
+        "clone_audio": "resources/sample.wav",
+        "case_catalog": "tests/moss_tts/moss_tts_warm_bench_cases.txt",
+        "max_new_frames": 300,
+        "active_codebooks": 16,
+        "do_sample": "false",
+        "text_temperature": 1.5,
+        "text_top_p": 1.0,
+        "text_top_k": 50,
+        "audio_temperature": 1.7,
+        "audio_top_p": 0.8,
+        "audio_top_k": 25,
+        "audio_repetition_penalty": 1.0,
+        "use_kv_cache": "true",
+        "voice_clone_max_text_tokens": 50,
+        "voice_clone_max_memory_per_sample_gb": 1.0,
+        "tts_max_batch_size": 0,
+        "codec_max_batch_size": 0,
+        "log_mel_cosine_min": 0.80,
+        "length_ratio_min": 0.90,
+        "whisper_word_timestamps": False,
+    },
     "qwen3_asr": {
         "kind": "asr",
         "modes": ["offline"],
@@ -187,27 +251,15 @@ FAMILY_CONFIG: dict[str, dict[str, Any]] = {
         "case_catalog": "tests/qwen3_forced_aligner/qwen3_forced_aligner_warm_bench_cases.json",
         "strict_alignment": True,
     },
-    "sortformer": {
-        "kind": "diar",
+    "ace_step": {
+        "kind": "ace_step",
         "modes": ["offline"],
-        "cpp_bin": "build/debug/bin/sortformer_diar_warm_bench",
-        "python_script": "tests/sortformer_diar/sortformer_diar_python_warm_bench.py",
-        "model": "models/diar_sortformer_4spk-v1",
-        "python_model": "nvidia/diar_sortformer_4spk-v1",
-    },
-    "citrinet_asr": {
-        "kind": "asr",
-        "modes": ["offline"],
-        "cpp_bin": "build/debug/bin/citrinet_asr_warm_bench",
-        "python_script": "tests/citrinet_asr/citrinet_asr_python_warm_bench.py",
-        "model": "models/citrinet",
-    },
-    "marblenet_vad": {
-        "kind": "vad",
-        "modes": ["offline"],
-        "cpp_bin": "build/debug/bin/marblenet_vad_warm_bench",
-        "python_script": "tests/marblenet_vad/marblenet_vad_python_warm_bench.py",
-        "model": "models/marblenet_vad",
+        "cpp_bin": "build/debug/bin/ace_step_warm_bench",
+        "python_script": "tests/ace_step/ace_step_python_warm_bench.py",
+        "python_conda_env": "index-tts",
+        "model": "models/Ace-Step1.5",
+        "case_catalog": "tests/ace_step/ace_step_warm_bench_cases.json",
+        "default_case_name": "parity_find",
     },
     "vevo2": {
         "kind": "vevo2",
@@ -261,6 +313,81 @@ FAMILY_CONFIG: dict[str, dict[str, Any]] = {
         "default_case_name": "cuda_parity_512char",
         "wav_cosine_min": 0.95,
         "log_mel_cosine_min": 0.95,
+    },
+    "vibevoice": {
+        "kind": "vibevoice",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/vibevoice_warm_bench",
+        "python_script": "tests/vibevoice/vibevoice_python_warm_bench.py",
+        "python_conda_env": "qwen3-tts",
+        "model": "models/VibeVoice-1.5B",
+        "case_catalog": "tests/vibevoice/vibevoice_warm_bench_cases.json",
+        "default_case_name": "short",
+        "default_requests_per_session": 1,
+        "default_warmup": 0,
+        "wav_cosine_min": 0.90,
+        "log_mel_cosine_min": 0.90,
+        "length_ratio_is_diagnostic": True,
+    },
+    "heartmula": {
+        "kind": "heartmula",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/heartmula_warm_bench",
+        "python_script": "tests/heartmula/heartmula_python_warm_bench.py",
+        "python_conda_env": "qwen3-tts",
+        "model": "models/HeartMuLa",
+        "case_catalog": "tests/heartmula/heartmula_warm_bench_cases.json",
+        "default_case_name": "default",
+        "default_requests_per_session": 1,
+        "default_warmup": 0,
+        "wav_cosine_min": 0.90,
+        "log_mel_cosine_min": 0.90,
+        "cpp_session_options": ["heartmula.weight_type=f32"],
+    },
+    "higgs_tts": {
+        "kind": "higgs_tts",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/higgs_tts_warm_bench",
+        "python_script": "tests/higgs_tts/higgs_tts_python_warm_bench.py",
+        "python_conda_env": "qwen3-tts",
+        "model": "models/higgs-audio-v3-tts-4b",
+        "case_catalog": "tests/higgs_tts/higgs_tts_warm_bench_cases.json",
+        "default_case_name": "default",
+        "default_requests_per_session": 1,
+        "default_warmup": 0,
+        "wav_cosine_min": 0.90,
+        "log_mel_cosine_min": 0.90,
+        "length_ratio_min": 0.98,
+        "cpp_session_options": ["higgs_tts.codec_weight_type=f32"],
+    },
+    "parakeet": {
+        "kind": "asr",
+        "modes": ["offline", "longform", "streaming"],
+        "cpp_bin": "build/debug/bin/parakeet_warm_bench",
+        "python_script": "tests/parakeet_tdt/parakeet_python_warm_bench.py",
+        "model": "models/parakeet-tdt-0.6b-v3",
+    },
+    "sortformer": {
+        "kind": "diar",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/sortformer_diar_warm_bench",
+        "python_script": "tests/sortformer_diar/sortformer_diar_python_warm_bench.py",
+        "model": "models/diar_sortformer_4spk-v1",
+        "python_model": "nvidia/diar_sortformer_4spk-v1",
+    },
+    "citrinet_asr": {
+        "kind": "asr",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/citrinet_asr_warm_bench",
+        "python_script": "tests/citrinet_asr/citrinet_asr_python_warm_bench.py",
+        "model": "models/citrinet",
+    },
+    "marblenet_vad": {
+        "kind": "vad",
+        "modes": ["offline"],
+        "cpp_bin": "build/debug/bin/marblenet_vad_warm_bench",
+        "python_script": "tests/marblenet_vad/marblenet_vad_python_warm_bench.py",
+        "model": "models/marblenet_vad",
     },
     "silero_vad": {
         "kind": "vad",
@@ -391,6 +518,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keep-output-dir", action="store_true")
     args = parser.parse_args()
     args.warmup_was_explicit = any(arg == "--warmup" or arg.startswith("--warmup=") for arg in sys.argv[1:])
+    args.requests_per_session_was_explicit = any(
+        arg == "--requests-per-session" or arg.startswith("--requests-per-session=")
+        for arg in sys.argv[1:]
+    )
     args.seed_was_explicit = any(arg == "--seed" or arg.startswith("--seed=") for arg in sys.argv[1:])
     return args
 
@@ -440,6 +571,18 @@ def aggregate_warmup_value(args: argparse.Namespace) -> int:
     if len(values) == 1:
         return next(iter(values))
     return args.warmup
+
+
+def aggregate_requests_per_session_value(args: argparse.Namespace) -> int:
+    if args.requests_per_session_was_explicit:
+        return args.requests_per_session
+    values = {
+        int(FAMILY_CONFIG[family].get("default_requests_per_session", args.requests_per_session))
+        for family in selected_families(args)
+    }
+    if len(values) == 1:
+        return next(iter(values))
+    return args.requests_per_session
 
 
 def load_omnivoice_case_catalog(path: Path) -> dict[str, dict[str, dict[str, Any]]]:
@@ -535,6 +678,47 @@ def resolve_tts_texts(
     if used_case_names:
         request_manifest["case_names"] = used_case_names
     return texts, request_manifest
+
+
+def resolve_ace_step_case(config: dict[str, Any], args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if len(args.case_names) > 1:
+        raise RuntimeError("ACE-Step warmbench accepts at most one --case-name")
+    if args.texts:
+        raise RuntimeError("ACE-Step warmbench uses JSON case requests; --text is not supported")
+    case_name = args.case_names[0] if args.case_names else str(config.get("default_case_name", "default"))
+    catalog_path = REPO_ROOT / str(config["case_catalog"])
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    case = catalog.get(case_name)
+    if not isinstance(case, dict):
+        available = ", ".join(sorted(catalog))
+        raise RuntimeError(f"unknown ACE-Step case name {case_name!r}; available: {available}")
+    requests = case.get("requests")
+    if not isinstance(requests, list) or not requests:
+        raise RuntimeError(f"ACE-Step case {case_name!r} has no requests")
+    if len(requests) < args.requests_per_session:
+        raise RuntimeError(
+            f"ACE-Step case {case_name!r} needs at least {args.requests_per_session} requests, only has {len(requests)}"
+        )
+    selected = [dict(request) for request in requests[: args.requests_per_session]]
+    if getattr(args, "seed_was_explicit", False):
+        for request in selected:
+            request["seed"] = args.seed
+    assert_fields = case.get("assert_optional_request_fields", [])
+    if assert_fields:
+        if not isinstance(assert_fields, list) or not all(isinstance(field, str) for field in assert_fields):
+            raise RuntimeError(f"ACE-Step case {case_name!r} has invalid assert_optional_request_fields")
+        for request_index, request in enumerate(selected):
+            for field in assert_fields:
+                if field not in request:
+                    raise RuntimeError(
+                        f"ACE-Step case {case_name!r} request {request_index} missing asserted optional field {field!r}"
+                    )
+                value = request[field]
+                if value is None or value == "" or value == []:
+                    raise RuntimeError(
+                        f"ACE-Step case {case_name!r} request {request_index} has empty asserted optional field {field!r}"
+                    )
+    return selected, {"case_name": case_name, "requests": selected, "assert_optional_request_fields": assert_fields}
 
 
 def resolve_vevo2_case(config: dict[str, Any], args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -969,6 +1153,25 @@ def load_qwen3_forced_aligner_cases(path: Path, count: int) -> tuple[dict[str, A
     return warmup, requests[:count]
 
 
+def load_separation_cases(path: Path, case_name: str, count: int, family_label: str) -> tuple[Path, list[Path]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"invalid {family_label} case catalog: {path}")
+    case = payload.get(case_name)
+    if not isinstance(case, dict):
+        available = ", ".join(sorted(payload))
+        raise RuntimeError(f"unknown {family_label} case name {case_name!r} in {path}; available: {available}")
+    warmup = case.get("warmup_audio")
+    requests = case.get("requests", [])
+    if not isinstance(warmup, str) or not warmup:
+        raise RuntimeError(f"{family_label} case {case_name!r} is missing warmup_audio")
+    if not isinstance(requests, list) or not requests:
+        raise RuntimeError(f"{family_label} case {case_name!r} has no requests")
+    if len(requests) < count:
+        raise RuntimeError(f"need {count} {family_label} requests, only found {len(requests)} in case {case_name!r}")
+    return Path(warmup), [Path(str(item)) for item in requests[:count]]
+
+
 def choose_diverse_texts(pool: list[str], count: int, seed: int, min_length: int = 12) -> list[str]:
     filtered_pool = [text for text in pool if len(text) >= min_length]
     if len(filtered_pool) >= count:
@@ -1150,6 +1353,17 @@ def compare_float(a: float, b: float, tolerance: float) -> bool:
     return abs(a - b) <= tolerance
 
 
+def compare_kokoro(cpp_summary: dict[str, Any], py_summary: dict[str, Any]) -> dict[str, Any]:
+    mismatches: list[str] = []
+    for key in ("sample_rate", "channels", "samples"):
+        if cpp_summary.get(key) != py_summary.get(key):
+            mismatches.append(key)
+    for key in ("sum", "mean_abs", "rms", "min", "max"):
+        if not compare_float(float(cpp_summary.get(key, 0.0)), float(py_summary.get(key, 0.0)), 1e-4):
+            mismatches.append(key)
+    return {"ok": not mismatches, "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}", "mismatches": mismatches}
+
+
 def compare_pocket(cpp_summary: dict[str, Any], py_summary: dict[str, Any]) -> dict[str, Any]:
     mismatches: list[str] = []
     for key in (
@@ -1174,8 +1388,95 @@ def compare_pocket(cpp_summary: dict[str, Any], py_summary: dict[str, Any]) -> d
     return {"ok": not mismatches, "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}", "mismatches": mismatches}
 
 
+def compare_moss_tts(
+    cpp_summary: dict[str, Any],
+    py_summary: dict[str, Any],
+    cpp_audio_path: Path,
+    py_audio_path: Path,
+    log_mel_cosine_min: float,
+    length_ratio_min: float,
+) -> dict[str, Any]:
+    import librosa
+    import numpy as np
+    import soundfile as sf
+
+    mismatches: list[str] = []
+    for key in ("sample_rate", "channels", "request_char_count"):
+        if key in cpp_summary and key in py_summary and cpp_summary.get(key) != py_summary.get(key):
+            mismatches.append(key)
+
+    cpp_audio, cpp_sr = sf.read(str(cpp_audio_path), always_2d=True)
+    py_audio, py_sr = sf.read(str(py_audio_path), always_2d=True)
+    if int(cpp_sr) != int(py_sr):
+        mismatches.append("sample_rate")
+    cpp_audio = np.asarray(cpp_audio, dtype=np.float32)
+    py_audio = np.asarray(py_audio, dtype=np.float32)
+    common_frames = min(cpp_audio.shape[0], py_audio.shape[0])
+    if common_frames <= 0:
+        return {
+            "ok": False,
+            "reason": "mismatch:empty_audio",
+            "mismatches": ["empty_audio"],
+            "metrics": {"log_mel_cosine_min": log_mel_cosine_min},
+        }
+    length_ratio = common_frames / float(max(cpp_audio.shape[0], py_audio.shape[0]))
+    if length_ratio < length_ratio_min:
+        mismatches.append("length_ratio")
+    cpp_mono = cpp_audio[:common_frames].mean(axis=1)
+    py_mono = py_audio[:common_frames].mean(axis=1)
+    mel_kwargs = {"sr": int(py_sr), "n_fft": 1024, "hop_length": 256, "n_mels": 80, "power": 2.0}
+    cpp_log_mel = np.log(np.maximum(librosa.feature.melspectrogram(y=cpp_mono, **mel_kwargs), 1.0e-10))
+    py_log_mel = np.log(np.maximum(librosa.feature.melspectrogram(y=py_mono, **mel_kwargs), 1.0e-10))
+    common_cols = min(cpp_log_mel.shape[1], py_log_mel.shape[1])
+    cpp_flat = cpp_log_mel[:, :common_cols].reshape(-1).astype(np.float64, copy=False)
+    py_flat = py_log_mel[:, :common_cols].reshape(-1).astype(np.float64, copy=False)
+    denom = float(np.linalg.norm(cpp_flat) * np.linalg.norm(py_flat))
+    log_mel_cosine = 1.0 if denom == 0.0 else float(np.dot(cpp_flat, py_flat) / denom)
+    if log_mel_cosine < log_mel_cosine_min:
+        mismatches.append("log_mel_cosine")
+    metrics = {
+        "log_mel_cosine": log_mel_cosine,
+        "log_mel_cosine_min": log_mel_cosine_min,
+        "length_ratio": length_ratio,
+        "length_ratio_min": length_ratio_min,
+        "cpp_frames": int(cpp_audio.shape[0]),
+        "python_frames": int(py_audio.shape[0]),
+        "common_frames": int(common_frames),
+        "sample_rate": int(py_sr),
+    }
+    return {
+        "ok": not mismatches,
+        "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}",
+        "mismatches": mismatches,
+        "metrics": metrics,
+    }
+
+
 def summarize_tts_asr(whisper_output: dict[str, Any]) -> str:
     return f"text={json.dumps(whisper_output.get('text', ''), ensure_ascii=False)} words={len(whisper_output.get('words', []))} json={whisper_output.get('json_path', '')}"
+
+
+def compare_parakeet_step(cpp_step: dict[str, Any], py_step: dict[str, Any]) -> dict[str, Any]:
+    mismatches: list[str] = []
+    sample_tolerance = 1
+    if normalize_text(str(cpp_step.get("text_output", ""))) != normalize_text(str(py_step.get("text_output", ""))):
+        mismatches.append("text_output")
+    cpp_words = cpp_step.get("word_timestamps", [])
+    py_words = py_step.get("word_timestamps", [])
+    if len(cpp_words) != len(py_words):
+        mismatches.append("word_count")
+    else:
+        for index, (cpp_word, py_word) in enumerate(zip(cpp_words, py_words)):
+            if normalize_text(str(cpp_word.get("word", ""))) != normalize_text(str(py_word.get("word", ""))):
+                mismatches.append(f"word[{index}]")
+                break
+            if abs(int(cpp_word.get("start_sample", 0)) - int(py_word.get("start_sample", 0))) > sample_tolerance:
+                mismatches.append(f"start_sample[{index}]")
+                break
+            if abs(int(cpp_word.get("end_sample", 0)) - int(py_word.get("end_sample", 0))) > sample_tolerance:
+                mismatches.append(f"end_sample[{index}]")
+                break
+    return {"ok": not mismatches, "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}", "mismatches": mismatches}
 
 
 def compare_qwen3_asr_step(
@@ -1302,6 +1603,113 @@ def compare_speaker_step(cpp_step: dict[str, Any], py_step: dict[str, Any]) -> d
     return {"ok": not mismatches, "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}", "mismatches": mismatches}
 
 
+def compare_separation_step(cpp_step: dict[str, Any], py_step: dict[str, Any]) -> dict[str, Any]:
+    import numpy as np
+    import soundfile as sf
+
+    cpp_stems = {
+        str(stem.get("name", "")): stem
+        for stem in cpp_step.get("stems", [])
+        if isinstance(stem, dict) and stem.get("name")
+    }
+    py_stems = {
+        str(stem.get("name", "")): stem
+        for stem in py_step.get("stems", [])
+        if isinstance(stem, dict) and stem.get("name")
+    }
+    mismatches: list[str] = []
+    metrics: dict[str, Any] = {}
+    if set(cpp_stems) != set(py_stems):
+        mismatches.append("stem_names")
+        return {
+            "ok": False,
+            "reason": f"mismatch:{mismatches[0]}",
+            "mismatches": mismatches,
+            "metrics": metrics,
+        }
+
+    for stem_name in sorted(py_stems):
+        cpp_stem = cpp_stems[stem_name]
+        py_stem = py_stems[stem_name]
+        cpp_summary = cpp_stem.get("summary", {})
+        py_summary = py_stem.get("summary", {})
+        stem_mismatches: list[str] = []
+        for key in ("sample_rate", "channels", "frames", "samples"):
+            if cpp_summary.get(key) != py_summary.get(key):
+                stem_mismatches.append(key)
+        cpp_audio_path = resolve_repo_path(str(cpp_stem.get("audio", "")))
+        py_audio_path = resolve_repo_path(str(py_stem.get("audio", "")))
+        if cpp_audio_path is None or py_audio_path is None or not cpp_audio_path.exists() or not py_audio_path.exists():
+            stem_mismatches.append("audio_path")
+            metrics[stem_name] = {"ok": False, "mismatches": stem_mismatches}
+            mismatches.append(f"{stem_name}:{stem_mismatches[0]}")
+            continue
+
+        cpp_audio, cpp_sr = sf.read(str(cpp_audio_path), always_2d=True)
+        py_audio, py_sr = sf.read(str(py_audio_path), always_2d=True)
+        cpp_audio = np.asarray(cpp_audio, dtype=np.float32)
+        py_audio = np.asarray(py_audio, dtype=np.float32)
+        if cpp_sr != py_sr:
+            stem_mismatches.append("sample_rate")
+        if cpp_audio.shape != py_audio.shape:
+            stem_mismatches.append("shape")
+            metrics[stem_name] = {
+                "ok": False,
+                "mismatches": stem_mismatches,
+                "cpp_shape": list(cpp_audio.shape),
+                "python_shape": list(py_audio.shape),
+            }
+            mismatches.append(f"{stem_name}:{stem_mismatches[0]}")
+            continue
+
+        diff = cpp_audio - py_audio
+        ref = py_audio
+        mae = float(np.mean(np.abs(diff), dtype=np.float64))
+        rmse = float(np.sqrt(np.mean(np.square(diff), dtype=np.float64)))
+        max_abs = float(np.max(np.abs(diff)))
+        cpp_flat = cpp_audio.reshape(-1).astype(np.float64, copy=False)
+        py_flat = py_audio.reshape(-1).astype(np.float64, copy=False)
+        denom = float(np.linalg.norm(cpp_flat) * np.linalg.norm(py_flat))
+        cosine = 1.0 if denom == 0.0 else float(np.dot(cpp_flat, py_flat) / denom)
+        ref_power = float(np.sum(np.square(ref, dtype=np.float64)))
+        err_power = float(np.sum(np.square(diff, dtype=np.float64)))
+        ref_rms = float(np.sqrt(np.mean(np.square(ref, dtype=np.float64))))
+        snr_db = float("inf") if err_power == 0.0 else float(10.0 * np.log10(max(ref_power, 1e-30) / err_power))
+        low_energy_ref = ref_rms < 1e-3
+
+        if mae > 1e-3:
+            stem_mismatches.append("mae")
+        if rmse > 2e-3:
+            stem_mismatches.append("rmse")
+        if max_abs > 2e-2:
+            stem_mismatches.append("max_abs")
+        if not low_energy_ref and cosine < 0.999:
+            stem_mismatches.append("cosine")
+        if not low_energy_ref and snr_db < 40.0:
+            stem_mismatches.append("snr_db")
+
+        metrics[stem_name] = {
+            "ok": not stem_mismatches,
+            "mismatches": stem_mismatches,
+            "mae": mae,
+            "rmse": rmse,
+            "max_abs": max_abs,
+            "cosine": cosine,
+            "snr_db": snr_db,
+            "ref_rms": ref_rms,
+            "low_energy_ref": low_energy_ref,
+        }
+        if stem_mismatches:
+            mismatches.append(f"{stem_name}:{stem_mismatches[0]}")
+
+    return {
+        "ok": not mismatches,
+        "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}",
+        "mismatches": mismatches,
+        "metrics": metrics,
+    }
+
+
 def compare_single_audio_step(
     cpp_step: dict[str, Any],
     py_step: dict[str, Any],
@@ -1311,6 +1719,7 @@ def compare_single_audio_step(
     mrstft_logmag_mae_max: float | None = None,
     similarity_vote_required: int | None = None,
     length_ratio_min: float = 0.98,
+    length_ratio_is_diagnostic: bool = False,
 ) -> dict[str, Any]:
     import librosa
     import numpy as np
@@ -1454,6 +1863,8 @@ def compare_single_audio_step(
         metrics["similarity_gate"] = "waveform_or_log_mel"
         if waveform_ok or log_mel_ok:
             mismatches = [item for item in mismatches if item not in {"cosine", "log_mel_cosine"}]
+            if length_ratio_is_diagnostic:
+                mismatches = [item for item in mismatches if item != "length_ratio"]
     return {
         "ok": not mismatches,
         "reason": "ok" if not mismatches else f"mismatch:{mismatches[0]}",
@@ -1537,6 +1948,64 @@ def build_tts_commands(
     if warmup_text:
         common_warmup_args = ["--warmup-text", warmup_text]
     model_path = args.model or config["model"]
+    if family == "kokoro":
+        python_command = [
+            PYTHON_EXE,
+            str(REPO_ROOT / config["python_script"]),
+            "--model",
+            config["model"],
+            "--voice-id",
+            config["voice_id"],
+            "--speaking-rate",
+            str(config.get("speaking_rate", 1.0)),
+            "--backend",
+            backend,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--audio-out",
+            str(audio_py),
+            "--audio-out-dir",
+            str(audio_py_dir),
+            "--timing-file",
+            str(timing_py),
+        ] + common_warmup_args + common_text_args
+        cpp_command = [
+            str(REPO_ROOT / config["cpp_bin"]),
+            "--model",
+            config["model"],
+            "--voice-id",
+            config["voice_id"],
+            "--speaking-rate",
+            str(config.get("speaking_rate", 1.0)),
+            "--backend",
+            backend,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--max-input-tokens",
+            str(config.get("max_input_tokens", 512)),
+            "--audio-out",
+            str(audio_cpp),
+            "--audio-out-dir",
+            str(audio_cpp_dir),
+            "--timing-file",
+            str(timing_cpp),
+        ] + common_warmup_args + common_text_args
+        for option in args.cpp_session_option:
+            cpp_command.extend(["--session-option", option])
+        return python_command, cpp_command
+
     if family in {"qwen3_tts", "qwen3_tts_voice_design", "qwen3_tts_custom_voice"}:
         max_new_tokens = args.max_new_tokens if args.max_new_tokens > 0 else config["max_new_tokens"]
         task_name = config.get("task", "tts")
@@ -1859,6 +2328,121 @@ def build_tts_commands(
             cpp_command.extend(["--session-option", option])
         return python_command, cpp_command
 
+    if family == "moss_tts":
+        clone_audio = args.clone_audio or config["clone_audio"]
+        max_new_frames = int(config.get("max_new_frames", 300))
+        active_codebooks = int(config.get("active_codebooks", 16))
+        do_sample = str(config.get("do_sample", "false"))
+        text_temperature = float(config.get("text_temperature", 1.5))
+        text_top_p = float(config.get("text_top_p", 1.0))
+        text_top_k = int(config.get("text_top_k", 50))
+        audio_temperature = float(config.get("audio_temperature", 1.7))
+        audio_top_p = float(config.get("audio_top_p", 0.8))
+        audio_top_k = int(config.get("audio_top_k", 25))
+        audio_repetition_penalty = float(config.get("audio_repetition_penalty", 1.0))
+        use_kv_cache = str(config.get("use_kv_cache", "true"))
+        voice_clone_max_text_tokens = int(config.get("voice_clone_max_text_tokens", 50))
+        voice_clone_max_memory_per_sample_gb = float(config.get("voice_clone_max_memory_per_sample_gb", 1.0))
+        tts_max_batch_size = int(config.get("tts_max_batch_size", 0))
+        codec_max_batch_size = int(config.get("codec_max_batch_size", 0))
+        python_command = [
+            PYTHON_EXE,
+            str(REPO_ROOT / config["python_script"]),
+            "--model",
+            model_path,
+            "--audio-tokenizer-model",
+            str(config["audio_tokenizer_model"]),
+            "--clone-audio",
+            clone_audio,
+            "--backend",
+            backend,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--max-new-frames",
+            str(max_new_frames),
+            "--active-codebooks",
+            str(active_codebooks),
+            "--do-sample",
+            do_sample,
+            "--text-temperature",
+            str(text_temperature),
+            "--text-top-p",
+            str(text_top_p),
+            "--text-top-k",
+            str(text_top_k),
+            "--audio-temperature",
+            str(audio_temperature),
+            "--audio-top-p",
+            str(audio_top_p),
+            "--audio-top-k",
+            str(audio_top_k),
+            "--audio-repetition-penalty",
+            str(audio_repetition_penalty),
+            "--use-kv-cache",
+            use_kv_cache,
+            "--voice-clone-max-text-tokens",
+            str(voice_clone_max_text_tokens),
+            "--voice-clone-max-memory-per-sample-gb",
+            str(voice_clone_max_memory_per_sample_gb),
+            "--tts-max-batch-size",
+            str(tts_max_batch_size),
+            "--codec-max-batch-size",
+            str(codec_max_batch_size),
+            "--audio-out",
+            str(audio_py),
+            "--audio-out-dir",
+            str(audio_py_dir),
+            "--timing-file",
+            str(timing_py),
+        ] + common_warmup_args + common_text_args
+        cpp_command = [
+            str(REPO_ROOT / config["cpp_bin"]),
+            "--model",
+            model_path,
+            "--clone-audio",
+            clone_audio,
+            "--backend",
+            backend,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--audio-out",
+            str(audio_cpp),
+            "--audio-out-dir",
+            str(audio_cpp_dir),
+            "--timing-file",
+            str(timing_cpp),
+        ] + common_warmup_args + common_text_args
+        cpp_request_options = {
+            "max_tokens": str(max_new_frames),
+            "active_codebooks": str(active_codebooks),
+            "do_sample": do_sample,
+            "use_kv_cache": use_kv_cache,
+            "text_temperature": str(text_temperature),
+            "text_top_p": str(text_top_p),
+            "text_top_k": str(text_top_k),
+            "audio_temperature": str(audio_temperature),
+            "audio_top_p": str(audio_top_p),
+            "audio_top_k": str(audio_top_k),
+            "audio_repetition_penalty": str(audio_repetition_penalty),
+        }
+        for key, value in cpp_request_options.items():
+            cpp_command.extend(["--request-option", f"{key}={value}"])
+        for option in args.cpp_session_option:
+            cpp_command.extend(["--session-option", option])
+        return python_command, cpp_command
+
     noise_file = scenario_dir / "shared_noise.bin"
     voice_args = ["--clone-audio", args.clone_audio] if args.clone_audio else ["--voice-id", config["voice_id"]]
     python_command = [
@@ -1922,6 +2506,99 @@ def build_tts_commands(
     ] + voice_args + common_warmup_args + common_text_args
     for option in args.cpp_session_option:
         cpp_command.extend(["--session-option", option])
+    return python_command, cpp_command
+
+
+def build_ace_step_commands(
+    config: dict[str, Any],
+    backend: str,
+    args: argparse.Namespace,
+    scenario_dir: Path,
+    requests: list[dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    request_sequence_json = json.dumps(requests, ensure_ascii=False, separators=(",", ":"))
+    model_path = args.model or config["model"]
+    python_env = str(config.get("python_conda_env", "qwen3-tts"))
+    noise_file = args.test_noise_file or ""
+    python_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        "python",
+        str(REPO_ROOT / config["python_script"]),
+        "--checkpoint-dir",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(args.warmup),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "python.timing.log"),
+        "--output-dir",
+        str(scenario_dir / "python_audio"),
+        # ACE-Step planner parity is sensitive to LM precision on CUDA, so the
+        # warmbench default pins the Python LM to fp32.
+        "--lm-dtype",
+        "float32",
+        "--noise-file",
+        noise_file,
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    for option in args.cpp_session_option:
+        if option.startswith("ace_step.dit_model_path="):
+            python_command.extend(["--config-path", option.split("=", 1)[1]])
+        elif option.startswith("ace_step.lm_model_path="):
+            python_command.extend(["--lm-model-path", option.split("=", 1)[1]])
+    cpp_command = [
+        str(REPO_ROOT / config["cpp_bin"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(args.warmup),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "cpp.timing.log"),
+        "--output-dir",
+        str(scenario_dir / "cpp_audio"),
+        # Keep the full ACE-Step GGML stack on fp32 by default for parity
+        # runs, including the VAE. The C++ VAE decoder now chunks long
+        # latent sequences so warmbench does not need a native-weight escape
+        # hatch that would hide real fp32 issues.
+        "--session-option",
+        "ace_step.weight_type=f32",
+        "--noise-file",
+        noise_file,
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    for option in args.cpp_session_option:
+        cpp_command.extend(["--session-option", option])
+    has_tensor_debug = any(option.startswith("ace_step.dit_tensor_") for option in args.cpp_session_option)
+    has_tensor_compare_result = any(
+        option.startswith("ace_step.dit_tensor_compare_result=")
+        for option in args.cpp_session_option
+    )
+    if has_tensor_debug and not has_tensor_compare_result:
+        cpp_command.extend([
+            "--session-option",
+            f"ace_step.dit_tensor_compare_result={scenario_dir / 'ace_step_dit_compare.json'}",
+        ])
     return python_command, cpp_command
 
 
@@ -2112,6 +2789,62 @@ def build_audio_commands(
             cpp_command.extend(["--session-option", option])
         return python_command, cpp_command
 
+    if family == "parakeet":
+        python_command = [
+            PYTHON_EXE,
+            str(REPO_ROOT / config["python_script"]),
+            "--model",
+            config["model"],
+            "--audio",
+            first_audio,
+            "--warmup-audio",
+            str(warmup_audio),
+            "--audio-sequence",
+            audio_sequence,
+            "--backend",
+            backend,
+            "--run-mode",
+            mode,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+        ]
+        cpp_command = [
+            str(REPO_ROOT / config["cpp_bin"]),
+            "--model",
+            config["model"],
+            "--audio",
+            first_audio,
+            "--warmup-audio",
+            str(warmup_audio),
+            "--audio-sequence",
+            audio_sequence,
+            "--backend",
+            backend,
+            "--run-mode",
+            mode,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--timing-file",
+            str(scenario_dir / "cpp.timing.log"),
+        ]
+        if mode == "longform":
+            cpp_command.extend(["--encoder-variant", "long_context"])
+        for option in args.cpp_session_option:
+            cpp_command.extend(["--session-option", option])
+        return python_command, cpp_command
+
     if config["kind"] in {"asr", "vad", "spk"}:
         python_command = [
             PYTHON_EXE,
@@ -2158,6 +2891,75 @@ def build_audio_commands(
             "--timing-file",
             str(scenario_dir / "cpp.timing.log"),
         ]
+        return python_command, cpp_command
+
+    if config["kind"] == "separation":
+        python_command = [
+            PYTHON_EXE,
+            str(REPO_ROOT / config["python_script"]),
+            "--model",
+            config.get("python_model", args.model or config["model"]),
+            "--family",
+            family,
+            "--audio",
+            first_audio,
+            "--warmup-audio",
+            str(warmup_audio),
+            "--audio-sequence",
+            audio_sequence,
+            "--backend",
+            backend,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--timing-file",
+            str(scenario_dir / "python.timing.log"),
+            "--output-dir",
+            str(scenario_dir / "python_audio"),
+        ]
+        python_config = str(config.get("python_config", ""))
+        if python_config:
+            python_command.extend(["--config-path", python_config])
+        python_repo = str(config.get("python_repo", ""))
+        if python_repo:
+            python_command.extend(["--repo", python_repo])
+        python_name = str(config.get("python_name", ""))
+        if python_name:
+            python_command.extend(["--model-name", python_name])
+        cpp_command = [
+            str(REPO_ROOT / config["cpp_bin"]),
+            "--model",
+            args.model or config["model"],
+            "--family",
+            family,
+            "--audio",
+            first_audio,
+            "--warmup-audio",
+            str(warmup_audio),
+            "--audio-sequence",
+            audio_sequence,
+            "--backend",
+            backend,
+            "--device",
+            str(args.device),
+            "--threads",
+            str(args.threads),
+            "--warmup",
+            str(args.warmup),
+            "--iterations",
+            str(args.iterations),
+            "--timing-file",
+            str(scenario_dir / "cpp.timing.log"),
+            "--output-dir",
+            str(scenario_dir / "cpp_audio"),
+        ]
+        for option in args.cpp_session_option:
+            cpp_command.extend(["--session-option", option])
         return python_command, cpp_command
 
     python_command = [
@@ -2315,6 +3117,265 @@ def build_voxcpm2_commands(
     return python_command, cpp_command
 
 
+def build_vibevoice_commands(
+    config: dict[str, Any],
+    backend: str,
+    args: argparse.Namespace,
+    scenario_dir: Path,
+    requests: list[dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    request_sequence_json = json.dumps(requests, ensure_ascii=False, separators=(",", ":"))
+    model_path = args.model or config["model"]
+    python_env = str(config.get("python_conda_env", "qwen3-tts"))
+    model_root = Path(model_path)
+    if not model_root.is_absolute():
+        model_root = REPO_ROOT / model_root
+    model_config = json.loads((model_root / "config.json").read_text(encoding="utf-8"))
+    latent_size = int(model_config["acoustic_vae_dim"])
+    decoder_capacity = int(model_config["decoder_config"]["max_position_embeddings"])
+    total_speakers = sum(max(1, len(request.get("voice_samples", []))) for request in requests)
+    prompt_noise_count = total_speakers + total_speakers * decoder_capacity * latent_size
+    prompt_noise_path = scenario_dir / "shared_prompt_noise.f32"
+    prompt_rng = random.Random(args.seed + 17)
+    prompt_values = array.array("f", (prompt_rng.gauss(0.0, 1.0) for _ in range(prompt_noise_count)))
+    prompt_noise_path.parent.mkdir(parents=True, exist_ok=True)
+    with prompt_noise_path.open("wb") as handle:
+        prompt_values.tofile(handle)
+    prompt_noise_file = str(prompt_noise_path)
+    noise_file = args.test_noise_file
+    if not noise_file:
+        max_new_tokens = max([int(request.get("max_new_tokens", 0)) for request in requests] + [0])
+        if max_new_tokens <= 0:
+            max_new_tokens = decoder_capacity
+        noise_count = max_new_tokens * 2 * len(requests) * latent_size
+        noise_path = scenario_dir / "shared_diffusion_noise.f32"
+        rng = random.Random(args.seed)
+        values = array.array("f", (rng.gauss(0.0, 1.0) for _ in range(noise_count)))
+        noise_path.parent.mkdir(parents=True, exist_ok=True)
+        with noise_path.open("wb") as handle:
+            values.tofile(handle)
+        noise_file = str(noise_path)
+    warmup_count = 0
+    python_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        "python",
+        str(REPO_ROOT / config["python_script"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(warmup_count),
+        "--iterations",
+        str(args.iterations),
+        "--output-dir",
+        str(scenario_dir / "python_audio"),
+        "--prompt-noise-file",
+        prompt_noise_file,
+        "--noise-file",
+        noise_file,
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    if any(bool(request.get("batch")) for request in requests):
+        python_command.append("--batch")
+    cpp_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        str(REPO_ROOT / config["cpp_bin"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(warmup_count),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "cpp.timing.log"),
+        "--log-file",
+        str(scenario_dir / "cpp.trace.log"),
+        "--output-dir",
+        str(scenario_dir / "cpp_audio"),
+        "--prompt-noise-file",
+        prompt_noise_file,
+        "--noise-file",
+        noise_file,
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    if any(bool(request.get("batch")) for request in requests):
+        cpp_command.append("--batch")
+    return python_command, cpp_command
+
+
+def build_heartmula_commands(
+    config: dict[str, Any],
+    backend: str,
+    args: argparse.Namespace,
+    scenario_dir: Path,
+    requests: list[dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    if backend != "cuda":
+        raise RuntimeError("HeartMuLa warmbench is CUDA-only")
+    request_sequence_json = json.dumps(requests, ensure_ascii=False, separators=(",", ":"))
+    model_path = args.model or config["model"]
+    python_env = str(config.get("python_conda_env", "qwen3-tts"))
+    python_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        "python",
+        str(REPO_ROOT / config["python_script"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(effective_warmup(config, args)),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "python.timing.log"),
+        "--output-dir",
+        str(scenario_dir / "python_audio"),
+        "--request-sequence-json",
+        request_sequence_json,
+        "--mula-dtype",
+        "float32",
+        "--codec-dtype",
+        "float32",
+        "--lazy-load",
+    ]
+    cpp_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        str(REPO_ROOT / config["cpp_bin"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(effective_warmup(config, args)),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "cpp.timing.log"),
+        "--output-dir",
+        str(scenario_dir / "cpp_audio"),
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    for option in config.get("cpp_session_options", []):
+        cpp_command.extend(["--session-option", option])
+    for option in args.cpp_session_option:
+        cpp_command.extend(["--session-option", option])
+    return python_command, cpp_command
+
+
+def build_higgs_tts_commands(
+    config: dict[str, Any],
+    backend: str,
+    args: argparse.Namespace,
+    scenario_dir: Path,
+    requests: list[dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    if backend != "cuda":
+        raise RuntimeError("Higgs TTS warmbench is CUDA-only")
+    request_sequence_json = json.dumps(requests, ensure_ascii=False, separators=(",", ":"))
+    model_path = args.model or config["model"]
+    python_env = str(config.get("python_conda_env", "qwen3-tts"))
+    python_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        "python",
+        str(REPO_ROOT / config["python_script"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(effective_warmup(config, args)),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "python.timing.log"),
+        "--output-dir",
+        str(scenario_dir / "python_audio"),
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    cpp_command = [
+        "conda",
+        "run",
+        "--no-capture-output",
+        "-n",
+        python_env,
+        str(REPO_ROOT / config["cpp_bin"]),
+        "--model",
+        model_path,
+        "--backend",
+        backend,
+        "--device",
+        str(args.device),
+        "--threads",
+        str(args.threads),
+        "--warmup",
+        str(effective_warmup(config, args)),
+        "--iterations",
+        str(args.iterations),
+        "--timing-file",
+        str(scenario_dir / "cpp.timing.log"),
+        "--output-dir",
+        str(scenario_dir / "cpp_audio"),
+        "--request-sequence-json",
+        request_sequence_json,
+    ]
+    if os.environ.get("HIGGS_TTS_WARMBENCH_TRACE") == "1":
+        python_command.append("--enable-trace")
+        cpp_command.extend(["--enable-trace", "--log-file", str(scenario_dir / "cpp.trace.log")])
+    for option in config.get("cpp_session_options", []):
+        cpp_command.extend(["--session-option", option])
+    for option in args.cpp_session_option:
+        cpp_command.extend(["--session-option", option])
+    return python_command, cpp_command
+
+
 def validate_tts_result(
     parsed: dict[str, Any],
     request_count: int,
@@ -2383,7 +3444,19 @@ def validate_sequence_result(summary: dict[str, Any], request_count: int, kind: 
             and isinstance(step.get("score", None), (int, float))
             and isinstance(step.get("metrics", {}), dict)
             for step in steps)
-    elif kind in {"vevo2", "seed_vc", "miocodec", "voxcpm2"}:
+    elif kind == "separation":
+        payload_valid = all(
+            isinstance(step.get("stems", []), list)
+            and len(step.get("stems", [])) > 0
+            and isinstance(step.get("metrics", {}), dict)
+            for step in steps)
+    elif kind == "ace_step":
+        payload_valid = all(
+            isinstance(step.get("stems", []), list)
+            and len(step.get("stems", [])) > 0
+            and isinstance(step.get("metrics", {}), dict)
+            for step in steps)
+    elif kind in {"vevo2", "seed_vc", "miocodec", "voxcpm2", "vibevoice", "heartmula", "higgs_tts"}:
         payload_valid = all(
             isinstance(step.get("stems", []), list)
             and len(step.get("stems", [])) > 0
@@ -2409,6 +3482,55 @@ def file_is_nonempty(path_text: str) -> bool:
         return False
     path = Path(path_text)
     return path.exists() and path.stat().st_size > 0
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def wav_frame_count(path: Path) -> int:
+    with wave.open(str(path), "rb") as handle:
+        return int(handle.getnframes())
+
+
+def first_sequence_audio(summary: dict[str, Any]) -> Path:
+    steps = summary.get("sequence_steps", [])
+    if not isinstance(steps, list) or not steps:
+        raise RuntimeError("ACE-Step hash compare requires at least one C++ sequence step")
+    stems = steps[0].get("stems", [])
+    if not isinstance(stems, list) or not stems:
+        raise RuntimeError("ACE-Step hash compare requires at least one C++ audio stem")
+    audio_path = resolve_repo_path(str(stems[0].get("audio", "")))
+    if audio_path is None:
+        raise RuntimeError("ACE-Step hash compare C++ audio path is missing")
+    return audio_path
+
+
+def ace_step_baseline_hash_compare(cpp_summary: dict[str, Any]) -> dict[str, Any]:
+    current_audio = first_sequence_audio(cpp_summary)
+    if not ACE_STEP_BASELINE_CPP_AUDIO.exists():
+        raise RuntimeError(f"ACE-Step baseline audio is missing: {ACE_STEP_BASELINE_CPP_AUDIO}")
+    if not current_audio.exists():
+        raise RuntimeError(f"ACE-Step C++ audio is missing: {current_audio}")
+    baseline_sha256 = sha256_file(ACE_STEP_BASELINE_CPP_AUDIO)
+    current_sha256 = sha256_file(current_audio)
+    baseline_frames = wav_frame_count(ACE_STEP_BASELINE_CPP_AUDIO)
+    current_frames = wav_frame_count(current_audio)
+    comparable = baseline_frames == current_frames
+    return {
+        "baseline_path": str(ACE_STEP_BASELINE_CPP_AUDIO),
+        "current_path": str(current_audio),
+        "baseline_frames": baseline_frames,
+        "current_frames": current_frames,
+        "comparable": comparable,
+        "baseline_sha256": baseline_sha256,
+        "current_sha256": current_sha256,
+        "match": baseline_sha256 == current_sha256,
+    }
 
 
 def sanitized_result_payload(kind: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -2446,6 +3568,12 @@ def run_scenario(
     master_log: Path,
 ) -> dict[str, Any]:
     scenario_config = dict(config)
+    original_requests_per_session = args.requests_per_session
+    if (
+        not getattr(args, "requests_per_session_was_explicit", False)
+        and "default_requests_per_session" in scenario_config
+    ):
+        args.requests_per_session = int(scenario_config["default_requests_per_session"])
     scenario_name = f"{family}_{mode}_{backend}"
     scenario_dir = root_output_dir / scenario_name
     if scenario_dir.exists() and not args.keep_output_dir:
@@ -2453,7 +3581,22 @@ def run_scenario(
     scenario_dir.mkdir(parents=True, exist_ok=True)
     append_log(master_log, f"SCENARIO START family={family} mode={mode} backend={backend} dir={scenario_dir}")
 
-    if scenario_config["kind"] in {"vevo2", "seed_vc"}:
+    if scenario_config["kind"] == "ace_step":
+        ace_requests, request_manifest = resolve_ace_step_case(config, args)
+        python_command, cpp_command = build_ace_step_commands(scenario_config, backend, args, scenario_dir, ace_requests)
+    elif scenario_config["kind"] == "vibevoice":
+        vibevoice_requests, request_manifest = resolve_vevo2_case(config, args)
+        args.requests_per_session = len(vibevoice_requests)
+        python_command, cpp_command = build_vibevoice_commands(scenario_config, backend, args, scenario_dir, vibevoice_requests)
+    elif scenario_config["kind"] == "heartmula":
+        heartmula_requests, request_manifest = resolve_vevo2_case(config, args)
+        args.requests_per_session = len(heartmula_requests)
+        python_command, cpp_command = build_heartmula_commands(scenario_config, backend, args, scenario_dir, heartmula_requests)
+    elif scenario_config["kind"] == "higgs_tts":
+        higgs_requests, request_manifest = resolve_vevo2_case(config, args)
+        args.requests_per_session = len(higgs_requests)
+        python_command, cpp_command = build_higgs_tts_commands(scenario_config, backend, args, scenario_dir, higgs_requests)
+    elif scenario_config["kind"] in {"vevo2", "seed_vc"}:
         vevo2_requests, request_manifest = resolve_vevo2_case(config, args)
         python_command, cpp_command = build_vevo2_commands(scenario_config, backend, args, scenario_dir, vevo2_requests)
     elif scenario_config["kind"] == "tts":
@@ -2485,7 +3628,23 @@ def run_scenario(
             )
         python_command, cpp_command = build_tts_commands(family, scenario_config, backend, args, scenario_dir, texts)
     else:
-        if family == "qwen3_asr":
+        if family in {"mel_band_roformer", "htdemucs"}:
+            if len(args.case_names) > 1:
+                raise RuntimeError(f"{family} warmbench accepts at most one --case-name")
+            case_name = args.case_names[0] if args.case_names else str(config.get("default_case_name", "default"))
+            family_label = "RoFormer" if family == "mel_band_roformer" else "HTDemucs"
+            warmup_case, request_cases = load_separation_cases(REPO_ROOT / config["case_catalog"], case_name, args.requests_per_session, family_label)
+            warmup_audio = REPO_ROOT / warmup_case if not warmup_case.is_absolute() else warmup_case
+            audio_requests = [
+                REPO_ROOT / item if not item.is_absolute() else item
+                for item in request_cases
+            ]
+            request_manifest = {
+                "case_name": case_name,
+                "warmup_audio": str(warmup_audio),
+                "audio_sequence": [str(path) for path in audio_requests],
+            }
+        elif family == "qwen3_asr":
             warmup_case, request_cases = load_qwen3_asr_cases(REPO_ROOT / config["case_catalog"], args.requests_per_session)
             qwen_audio_dir = scenario_dir / "qwen3_asr_audio"
             warmup_audio = materialize_qwen3_asr_audio(warmup_case, qwen_audio_dir, 0, "warmup")
@@ -2570,6 +3729,8 @@ def run_scenario(
     append_log(master_log, f"PYTHON START family={family} mode={mode} backend={backend} command={' '.join(python_command)}")
     python_env = os.environ.copy()
     python_env.pop("LD_LIBRARY_PATH", None)
+    if scenario_config["kind"] == "ace_step":
+        python_env["ACESTEP_PROJECT_ROOT"] = str(scenario_dir)
     python_stdout, python_memory = run_command(python_command, scenario_dir / "python.log", env=python_env)
     append_log(master_log, f"PYTHON END family={family} mode={mode} backend={backend}")
     append_log(
@@ -2604,7 +3765,7 @@ def run_scenario(
         min_rms = float(scenario_config.get("min_rms", 0.0))
         python_valid = validate_tts_result(python_parsed, args.requests_per_session, min_rms)
         cpp_valid = validate_tts_result(cpp_parsed, args.requests_per_session, min_rms)
-        waveform_compare_fn = compare_pocket
+        waveform_compare_fn = compare_kokoro if family == "kokoro" else compare_pocket
         python_whisper_results: list[dict[str, Any]] = []
         cpp_whisper_results: list[dict[str, Any]] = []
         for request_index in range(args.requests_per_session):
@@ -2647,9 +3808,23 @@ def run_scenario(
                         python_whisper,
                         float(scenario_config.get("asr_compact_lcs_min", 0.0)),
                     )
-                    waveform_parity = waveform_compare_fn(cpp_parsed["summaries"][request_index], python_parsed["summaries"][request_index])
-                    parity_ok = asr_parity["ok"]
-                    parity_reason = asr_parity["reason"]
+                    if family == "moss_tts":
+                        waveform_parity = compare_moss_tts(
+                            cpp_parsed["summaries"][request_index],
+                            python_parsed["summaries"][request_index],
+                            cpp_audio_path,
+                            python_audio_path,
+                            float(scenario_config.get("log_mel_cosine_min", 0.80)),
+                            float(scenario_config.get("length_ratio_min", 0.98)),
+                        )
+                        parity_ok = asr_parity["ok"] and waveform_parity["ok"]
+                        parity_reason = "ok" if parity_ok else (
+                            asr_parity["reason"] if not asr_parity["ok"] else waveform_parity["reason"]
+                        )
+                    else:
+                        waveform_parity = waveform_compare_fn(cpp_parsed["summaries"][request_index], python_parsed["summaries"][request_index])
+                        parity_ok = asr_parity["ok"]
+                        parity_reason = asr_parity["reason"]
                     parity = {
                         "ok": parity_ok,
                         "reason": parity_reason,
@@ -2669,7 +3844,24 @@ def run_scenario(
                 append_log(master_log, f"PARITY family={family} mode={mode} backend={backend} request={request_index} ok={int(parity['ok'])} reason={parity['reason']}")
         python_result_payload["whisper"] = python_whisper_results
         cpp_result_payload["whisper"] = cpp_whisper_results
-    elif scenario_config["kind"] in {"vevo2", "seed_vc", "miocodec", "voxcpm2"}:
+    elif scenario_config["kind"] == "ace_step":
+        python_valid = validate_sequence_result(python_summary, args.requests_per_session, "ace_step")
+        cpp_valid = validate_sequence_result(cpp_summary, args.requests_per_session, "ace_step")
+        hash_compare = ace_step_baseline_hash_compare(cpp_summary)
+        append_log(
+            master_log,
+            f"ACE_STEP_HASH_COMPARE family={family} mode={mode} backend={backend} "
+            f"match={int(hash_compare['match'])} baseline_sha256={hash_compare['baseline_sha256']} "
+            f"current_sha256={hash_compare['current_sha256']}",
+        )
+        python_step_paths = write_sequence_step_artifacts(python_summary.get("sequence_steps", []), scenario_dir / "python_json", "python")
+        cpp_step_paths = write_sequence_step_artifacts(cpp_summary.get("sequence_steps", []), scenario_dir / "cpp_json", "cpp")
+        for request_index in range(args.requests_per_session):
+            python_step_path = python_step_paths[request_index] if request_index < len(python_step_paths) else ""
+            cpp_step_path = cpp_step_paths[request_index] if request_index < len(cpp_step_paths) else ""
+            append_log(master_log, f"PYTHON OUTPUT family={family} mode={mode} backend={backend} request={request_index} path={python_step_path} valid={int(file_is_nonempty(python_step_path))}")
+            append_log(master_log, f"CPP OUTPUT family={family} mode={mode} backend={backend} request={request_index} path={cpp_step_path} valid={int(file_is_nonempty(cpp_step_path))}")
+    elif scenario_config["kind"] in {"vevo2", "seed_vc", "miocodec", "voxcpm2", "vibevoice", "heartmula", "higgs_tts"}:
         python_valid = validate_sequence_result(python_summary, args.requests_per_session, scenario_config["kind"])
         cpp_valid = validate_sequence_result(cpp_summary, args.requests_per_session, scenario_config["kind"])
         python_step_paths = write_sequence_step_artifacts(python_summary.get("sequence_steps", []), scenario_dir / "python_json", "python")
@@ -2693,6 +3885,7 @@ def run_scenario(
                     float(scenario_config["mrstft_logmag_mae_max"]) if "mrstft_logmag_mae_max" in scenario_config else None,
                     int(scenario_config["similarity_vote_required"]) if "similarity_vote_required" in scenario_config else None,
                     float(scenario_config.get("length_ratio_min", 0.98)),
+                    bool(scenario_config.get("length_ratio_is_diagnostic", False)),
                 )
                 parity["request_index"] = request_index
                 parity["request"] = request_manifest["requests"][request_index]
@@ -2717,13 +3910,16 @@ def run_scenario(
             elif request_index >= len(cpp_summary.get("sequence_steps", [])):
                 parity = missing_parity(request_index, request_manifest["audio_sequence"][request_index], "missing_cpp_step")
             else:
-                expected_fragments = request_manifest.get("expected_fragments", [])
-                parity = compare_qwen3_asr_step(
-                    cpp_summary["sequence_steps"][request_index],
-                    python_summary["sequence_steps"][request_index],
-                    expected_fragments[request_index] if request_index < len(expected_fragments) else [],
-                    bool(config.get("check_language", False)),
-                )
+                if family == "qwen3_asr":
+                    expected_fragments = request_manifest.get("expected_fragments", [])
+                    parity = compare_qwen3_asr_step(
+                        cpp_summary["sequence_steps"][request_index],
+                        python_summary["sequence_steps"][request_index],
+                        expected_fragments[request_index] if request_index < len(expected_fragments) else [],
+                        bool(config.get("check_language", False)),
+                    )
+                else:
+                    parity = compare_parakeet_step(cpp_summary["sequence_steps"][request_index], python_summary["sequence_steps"][request_index])
                 parity["request_index"] = request_index
                 parity["request"] = request_manifest["audio_sequence"][request_index]
             parity_results.append(parity)
@@ -2748,6 +3944,8 @@ def run_scenario(
                     parity = compare_vad_step(cpp_summary["sequence_steps"][request_index], python_summary["sequence_steps"][request_index])
                 elif sequence_kind == "spk":
                     parity = compare_speaker_step(cpp_summary["sequence_steps"][request_index], python_summary["sequence_steps"][request_index])
+                elif sequence_kind == "separation":
+                    parity = compare_separation_step(cpp_summary["sequence_steps"][request_index], python_summary["sequence_steps"][request_index])
                 elif sequence_kind == "alignment":
                     expected_words = request_manifest.get("expected_words", [])
                     parity = compare_qwen3_forced_aligner_step(
@@ -2755,10 +3953,8 @@ def run_scenario(
                         python_summary["sequence_steps"][request_index],
                         expected_words[request_index] if request_index < len(expected_words) else [],
                     )
-                elif sequence_kind == "diar":
-                    parity = compare_sortformer_step(cpp_summary["sequence_steps"][request_index], python_summary["sequence_steps"][request_index])
                 else:
-                    raise RuntimeError(f"unsupported warmbench sequence kind: {sequence_kind}")
+                    parity = compare_sortformer_step(cpp_summary["sequence_steps"][request_index], python_summary["sequence_steps"][request_index])
                 parity["request_index"] = request_index
                 parity["request"] = request_manifest["audio_sequence"][request_index]
             parity_results.append(parity)
@@ -2788,8 +3984,21 @@ def run_scenario(
         "parity": parity_results,
         "ok": python_valid["ok"] and cpp_valid["ok"] and all(item["ok"] for item in parity_results),
     }
+    if scenario_config["kind"] == "ace_step":
+        scenario_summary["hash_compare"] = hash_compare
+        if hash_compare["comparable"]:
+            scenario_summary["ok"] = scenario_summary["ok"] and hash_compare["match"]
+        dit_compare_path = scenario_dir / "ace_step_dit_compare.json"
+        if dit_compare_path.exists():
+            dit_compare = json.loads(dit_compare_path.read_text(encoding="utf-8"))
+            scenario_summary["dit_tensor_compare"] = {
+                "path": str(dit_compare_path),
+                "result": dit_compare,
+            }
+            scenario_summary["ok"] = scenario_summary["ok"] and bool(dit_compare.get("ok", False))
     (scenario_dir / "scenario_summary.json").write_text(json.dumps(scenario_summary, indent=2, ensure_ascii=False), encoding="utf-8")
     append_log(master_log, f"SCENARIO END family={family} mode={mode} backend={backend} ok={int(scenario_summary['ok'])}")
+    args.requests_per_session = original_requests_per_session
     return scenario_summary
 
 
@@ -2804,7 +4013,8 @@ def main() -> int:
     root_output_dir.mkdir(parents=True, exist_ok=True)
     master_log = root_output_dir / "run.log"
 
-    append_log(master_log, f"RUN START stamp={stamp} modes={args.mode} backends={selected_backends(args)} requests_per_session={args.requests_per_session}")
+    aggregate_requests_per_session = aggregate_requests_per_session_value(args)
+    append_log(master_log, f"RUN START stamp={stamp} modes={args.mode} backends={selected_backends(args)} requests_per_session={aggregate_requests_per_session}")
     summary: dict[str, Any] = {
         "artifact_stamp": stamp,
         "warmup": aggregate_warmup_value(args),
@@ -2813,7 +4023,7 @@ def main() -> int:
         "iterations": args.iterations,
         "threads": args.threads,
         "device": args.device,
-        "requests_per_session": args.requests_per_session,
+        "requests_per_session": aggregate_requests_per_session,
         "scenarios": [],
     }
     for family in selected_families(args):
