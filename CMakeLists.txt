@@ -205,6 +205,13 @@ add_library(engine_runtime STATIC
     src/models/miotts/causal_lm.cpp
     src/models/miotts/session.cpp
     src/models/miotts/loader.cpp
+    src/models/higgs_tts/assets.cpp
+    src/models/higgs_tts/audio_codes.cpp
+    src/models/higgs_tts/codec.cpp
+    src/models/higgs_tts/generator.cpp
+    src/models/higgs_tts/tokenizer.cpp
+    src/models/higgs_tts/session.cpp
+    src/models/higgs_tts/loader.cpp
     src/models/voxcpm2/assets.cpp
     src/models/voxcpm2/audiovae.cpp
     src/models/voxcpm2/generator.cpp

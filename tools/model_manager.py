@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import fractions
+import importlib
 import io
 import json
 import os
@@ -19,10 +20,6 @@ from typing import Any, Iterable
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-
-import torch
-from safetensors.torch import load_file, save_file
-import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +52,43 @@ DEMUCS_BAGS: dict[str, dict[str, Any]] = {
     "htdemucs_6s": {"models": ["5c90dfd2"]},
     "hdemucs_mmi": {"models": ["75fc33f5"], "segment": 44},
 }
+
+
+class LazyModule:
+    def __init__(self, name: str, install_hint: str) -> None:
+        self.name = name
+        self.install_hint = install_hint
+        self._module: Any | None = None
+
+    def _load(self) -> Any:
+        if self._module is None:
+            try:
+                self._module = importlib.import_module(self.name)
+            except ModuleNotFoundError as exc:
+                root_name = self.name.split(".", 1)[0]
+                if exc.name == root_name:
+                    raise RuntimeError(
+                        f"missing Python dependency {self.name}; install {self.install_hint} "
+                        "for conversion/post-processing packages"
+                    ) from exc
+                raise
+        return self._module
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._load(), attr)
+
+
+torch = LazyModule("torch", "torch")
+yaml = LazyModule("yaml", "PyYAML")
+_safetensors_torch = LazyModule("safetensors.torch", "safetensors")
+
+
+def load_file(*args: Any, **kwargs: Any) -> Any:
+    return _safetensors_torch.load_file(*args, **kwargs)
+
+
+def save_file(*args: Any, **kwargs: Any) -> Any:
+    return _safetensors_torch.save_file(*args, **kwargs)
 
 
 def huggingface_token() -> str | None:
@@ -137,6 +171,41 @@ def package_install_kind(package: ModelPackage) -> str:
 
 
 def package_usage_examples(package: ModelPackage) -> list[str]:
+    if package.id == "higgs_audio_v3_tts_4b":
+        return [
+            "python tools/model_manager.py install higgs_audio_v3_tts_4b --models-root models",
+            "python tools/model_manager.py install qwen3_asr_0_6b --models-root models  # optional reference transcript ASR",
+            (
+                "audiocpp_cli --task tts --family higgs_tts "
+                "--model models/higgs-audio-v3-tts-4b --backend cuda "
+                "--text \"Hello from Higgs Audio.\" --out out.wav"
+            ),
+            (
+                "python tools/prepare_voice_ref.py /path/to/reference.mp3-or-wav "
+                "--output /path/to/reference_ref_24k.wav --overwrite"
+            ),
+            (
+                "audiocpp_cli --task asr --family qwen3_asr "
+                "--model models/Qwen3-ASR-0.6B --backend cuda "
+                "--audio /path/to/reference_ref_24k.wav --text \"\""
+            ),
+            (
+                "audiocpp_cli --task tts --family higgs_tts "
+                "--model models/higgs-audio-v3-tts-4b --backend cuda "
+                "--text \"This is a cloned voice test.\" "
+                "--voice-ref /path/to/reference_ref_24k.wav --reference-text \"Transcript of the reference clip.\" "
+                "--out clone.wav"
+            ),
+        ]
+    if package.id == "qwen3_asr_0_6b":
+        return [
+            "python tools/model_manager.py install qwen3_asr_0_6b --models-root models",
+            (
+                "audiocpp_cli --task asr --family qwen3_asr "
+                "--model models/Qwen3-ASR-0.6B --backend cuda "
+                "--audio /path/to/speech.wav --text \"\" --words-out words.json"
+            ),
+        ]
     if package.id == "voxcpm2_audiovae":
         return [
             "python tools/model_manager.py install voxcpm2_audiovae --source-file models/VoxCPM2/audiovae.pth --models-root models --overwrite",
@@ -257,6 +326,10 @@ CATALOG: tuple[ModelPackage, ...] = (
             "tokenizer_config.json",
             "vocab.json",
             "merges.txt",
+        ),
+        description=(
+            "Direct Hugging Face snapshot for native Qwen3 ASR. "
+            "Install this optional companion model when a TTS workflow needs reference transcripts."
         ),
     ),
     ModelPackage(
@@ -523,6 +596,10 @@ CATALOG: tuple[ModelPackage, ...] = (
             "model.safetensors",
             "tokenizer.json",
             "tokenizer_config.json",
+        ),
+        description=(
+            "Direct Hugging Face snapshot for Higgs Audio v3 TTS 4B. "
+            "Released under Boson's research/non-commercial license; users must download the weights locally before running."
         ),
     ),
     ModelPackage(

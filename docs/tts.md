@@ -268,12 +268,27 @@ Higgs Audio v3 TTS is a voice-clone TTS model. The current integration uses the 
 audiocpp_cli --task tts --family higgs_tts --model models/higgs-audio-v3-tts-4b --backend cuda --text "Hello from Higgs Audio." --voice-ref assets/resources/b.wav --reference-text "Some call me nature. Others call me Mother Nature. I've been here for over 4.5 billion years. 22,500 times longer than you." --out out.wav
 ```
 
+Prepare WAV/MP3/M4A/FLAC references for `--voice-ref`; this normalizes them to mono 24 kHz WAV:
+
+```bash
+python3 tools/prepare_voice_ref.py sample-5.mp3 --output sample-5_ref_24k.wav --overwrite
+```
+
+If the reference transcript is unknown, install the native Qwen3 ASR package and transcribe the prepared reference first:
+
+```bash
+python3 tools/model_manager.py install qwen3_asr_0_6b --models-root models
+audiocpp_cli --task asr --family qwen3_asr --model models/Qwen3-ASR-0.6B --backend cuda --audio sample-5_ref_24k.wav --text ""
+```
+
+Copy the printed `text_output=...` value into Higgs `--reference-text`. Higgs does not run ASR inside the TTS session; ASR is an optional companion model.
+
 | Option | Values | Default | Meaning |
 |---|---|---:|---|
 | `--voice-ref` | WAV path | required | Reference speaker audio. |
 | `--reference-text` | text | empty string | Transcript for reference audio. |
 | `--text-chunk-size` | integer chars | `512` | Long-form chunk size. |
-| `--max-tokens` | integer | `1024` | Maximum generated AR tokens per chunk. |
+| `--max-tokens` | integer | `1024` | Maximum generated AR tokens per chunk. Raise this if speech stops before the text finishes. |
 | `--temperature` | float | `0.8` | AR sampling temperature. |
 | `--top-k` | integer | `30` | AR top-k sampling limit. |
 | `--top-p` | float | `0.8` | AR nucleus sampling limit. |
