@@ -20,7 +20,8 @@ std::filesystem::path resolve_model_root(const std::filesystem::path & model_pat
 }
 
 bool has_higgs_tts_assets(const std::filesystem::path & root) {
-    return engine::io::is_existing_file(root / "model.safetensors");
+    return engine::io::is_existing_file(root / "model.gguf") ||
+           engine::io::is_existing_file(root / "model.safetensors");
 }
 
 void push_asset(std::vector<runtime::NamedAsset> & assets, std::string id, const std::filesystem::path & path) {
@@ -72,7 +73,7 @@ runtime::ModelMetadata make_metadata(const HiggsTTSAssets & assets) {
         "chat_template.jinja",
         "higgs_audio_v2_tokenizer_config.json",
     };
-    metadata.weight_candidates = {"model.safetensors", "model.safetensors.index.json"};
+    metadata.weight_candidates = {"model.gguf", "model.safetensors", "model.safetensors.index.json"};
     return metadata;
 }
 

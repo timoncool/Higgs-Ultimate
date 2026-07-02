@@ -31,6 +31,29 @@ std::filesystem::path resolve_model_root(const std::filesystem::path & model_pat
     throw std::runtime_error("Higgs TTS model path does not exist: " + model_path.string());
 }
 
+bool is_model_weight_file(const std::filesystem::path & path) {
+    const auto extension = path.extension().string();
+    return extension == ".safetensors" || extension == ".gguf";
+}
+
+std::filesystem::path resolve_model_weights_path(
+    const std::filesystem::path & model_path,
+    const std::filesystem::path & model_root) {
+    if (engine::io::is_existing_file(model_path) && is_model_weight_file(model_path)) {
+        return canonical_existing_file(model_path);
+    }
+    const auto gguf = model_root / "model.gguf";
+    if (engine::io::is_existing_file(gguf)) {
+        return canonical_existing_file(gguf);
+    }
+    const auto safetensors = model_root / "model.safetensors";
+    if (engine::io::is_existing_file(safetensors)) {
+        return canonical_existing_file(safetensors);
+    }
+    throw std::runtime_error(
+        "Higgs TTS missing model weights; searched:\n  " + gguf.string() + "\n  " + safetensors.string());
+}
+
 std::optional<std::filesystem::path> env_path(const char * name) {
     const char * value = std::getenv(name);
     if (value == nullptr || *value == '\0') {
@@ -230,7 +253,7 @@ HiggsTTSAssetPaths resolve_paths(const std::filesystem::path & model_path) {
     const auto small_roots = small_asset_roots(model_root);
     HiggsTTSAssetPaths paths;
     paths.model_root = model_root;
-    paths.model_weights_path = require_first_file({model_root}, "model.safetensors", "model weights");
+    paths.model_weights_path = resolve_model_weights_path(model_path, model_root);
     paths.config_path = require_first_file(small_roots, "config.json", "config");
     paths.tokenizer_config_path = require_first_file(small_roots, "tokenizer_config.json", "tokenizer config");
     paths.tokenizer_json_path = require_first_file(small_roots, "tokenizer.json", "tokenizer json");

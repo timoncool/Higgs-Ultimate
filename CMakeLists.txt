@@ -386,6 +386,15 @@ if (ENGINE_ENABLE_OPENMP)
     target_link_libraries(audiocpp_cli PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
+add_executable(quantize_safetensors
+    tools/quantize_safetensors.cpp
+)
+
+target_link_libraries(quantize_safetensors PRIVATE engine_runtime ggml)
+if (ENGINE_ENABLE_OPENMP)
+    target_link_libraries(quantize_safetensors PRIVATE OpenMP::OpenMP_CXX)
+endif()
+
 add_executable(audiocpp_server
     app/server/main.cpp
     app/server/config.cpp
@@ -433,6 +442,7 @@ if (ENGINE_BUILD_WARMBENCH)
 
     add_engine_warmbench(chatterbox_warm_bench tests/chatterbox/chatterbox_warm_bench.cpp)
     add_engine_warmbench(citrinet_asr_warm_bench tests/citrinet_asr/citrinet_asr_warm_bench.cpp)
+    add_engine_warmbench(higgs_tts_warm_bench tests/higgs_tts/higgs_tts_warm_bench.cpp)
     add_engine_warmbench(marblenet_vad_warm_bench tests/marblenet_vad/marblenet_vad_warm_bench.cpp)
     add_engine_warmbench(miocodec_warm_bench tests/miocodec/miocodec_warm_bench.cpp)
     add_engine_warmbench(omnivoice_warm_bench tests/omnivoice/omnivoice_warm_bench.cpp)
