@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Preset = "windows-cuda-release",
-    [string]$Target = "audiocpp_cli",
+    [string]$Target = "audiocpp_engine",
     [int]$Jobs = 0,
     [switch]$ConfigureOnly,
     [switch]$Clean,
@@ -257,7 +257,6 @@ function Get-PresetSettings {
         "windows-cpu-release" {
             return @{
                 BuildType = "Release"
-                BuildTests = "OFF"
                 Native = "OFF"
                 EnableCuda = "OFF"
                 EnableCudaGraphs = "OFF"
@@ -268,7 +267,6 @@ function Get-PresetSettings {
         "windows-cuda-debug" {
             return @{
                 BuildType = "Debug"
-                BuildTests = "ON"
                 Native = "OFF"
                 EnableCuda = "ON"
                 EnableCudaGraphs = "ON"
@@ -279,7 +277,6 @@ function Get-PresetSettings {
         "windows-cuda-release" {
             return @{
                 BuildType = "Release"
-                BuildTests = "OFF"
                 Native = "OFF"
                 EnableCuda = "ON"
                 EnableCudaGraphs = "ON"
@@ -290,7 +287,6 @@ function Get-PresetSettings {
         "windows-cuda-native-debug" {
             return @{
                 BuildType = "Debug"
-                BuildTests = "ON"
                 Native = "ON"
                 EnableCuda = "ON"
                 EnableCudaGraphs = "ON"
@@ -381,7 +377,6 @@ $configureArgs = @(
     "-DENGINE_ENABLE_METAL=OFF",
     "-DGGML_OPENMP=ON",
     "-DGGML_NATIVE=$($settings.Native)",
-    "-DENGINE_BUILD_TESTS=$($settings.BuildTests)",
     "-DENGINE_BUILD_DESKTOP_API=ON"
 )
 if ($settings.CFlagsDebug -ne "") {

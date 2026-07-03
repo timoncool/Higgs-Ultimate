@@ -4,10 +4,11 @@
 
 作者: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.1.0` 是一个 Windows 桌面应用，用来在本机运行
-`audio.cpp` 的 Higgs Audio v3 TTS 引擎。应用不会通过 Python 环境或 CLI
-sidecar 绕一圈，而是由 Tauri 前端调用 Rust 命令，Rust 再通过 `libloading`
-加载 `audiocpp_engine.dll`，最后进入 C++/CUDA 推理路径。
+Higgs Audio v3 Studio `0.1.0` 是一个使用 Rust/Tauri 构建的 Windows 桌面
+应用，用来通过原生 C++/CUDA 引擎在本机运行 Higgs Audio v3 TTS 推理。应用
+不会通过 Python 环境或 CLI sidecar 绕一圈，而是由 Tauri 前端调用 Rust
+命令，Rust 再通过 `libloading` 加载 `audiocpp_engine.dll`，最后进入原生
+推理路径。
 
 这个项目的目标是提供一个实用的本地语音生成工作流：普通 TTS、声音克隆、
 继续说话、多说话人生成、Whisper 自动转写、WAV/MP3 导出，以及 GPU/VRAM

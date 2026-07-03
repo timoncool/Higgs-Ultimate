@@ -11,10 +11,11 @@
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.1.0` is a Windows desktop app for running the `audio.cpp`
-Higgs Audio v3 TTS engine in-process. The app does not shell out to a CLI sidecar.
-The Tauri UI calls Rust commands, Rust loads `audiocpp_engine.dll` with `libloading`,
-and the DLL executes the native C++/CUDA inference path through a small C ABI.
+Higgs Audio v3 Studio `0.1.0` is a Windows desktop app built with Rust/Tauri for
+local Higgs Audio v3 TTS inference through a native C++/CUDA engine. The app does
+not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust loads
+`audiocpp_engine.dll` with `libloading`, and the DLL executes the native
+inference path through a small C ABI.
 
 The goal is simple: a practical desktop workflow for local TTS, voice cloning,
 speech continuation, and multi-speaker generation without making users manage a
@@ -515,8 +516,9 @@ desktop/src/                   TypeScript UI
 desktop/src-tauri/src/         Rust command layer and DLL loader
 include/                       Public C++ framework headers
 src/models/higgs_tts/          Higgs Audio v3 model implementation
+external/ggml/                 Vendored ggml backend sources
+external/whisper.cpp/          Whisper submodule used by the engine DLL
 scripts/build_windows.ps1      Windows CMake/MSVC build helper
-tests/higgs_tts/               Higgs warmbench helpers
 ```
 
 ## Upstream And Credits

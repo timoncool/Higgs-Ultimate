@@ -3,32 +3,7 @@
 #include "engine/framework/debug/trace.h"
 #include "engine/framework/io/config.h"
 #include "engine/framework/io/filesystem.h"
-// Development registry entries from Share/AudioCPP that are not present in this release tree yet:
-// #include "engine/models/ace_step/loader.h"
-// #include "engine/models/demucs/session.h"
-// #include "engine/models/heartmula/loader.h"
-// #include "engine/models/higgs_tts/loader.h"
-// #include "engine/models/kokoro_tts/loader.h"
-// #include "engine/models/moss_tts/loader.h"
-// #include "engine/models/parakeet_tdt/loader.h"
-// #include "engine/models/roformer/session.h"
-#include "engine/models/chatterbox/loader.h"
-#include "engine/models/citrinet_asr/session.h"
 #include "engine/models/higgs_tts/loader.h"
-#include "engine/models/marblenet_vad/session.h"
-#include "engine/models/miocodec/loader.h"
-#include "engine/models/miotts/loader.h"
-#include "engine/models/omnivoice/loader.h"
-#include "engine/models/pocket_tts/loader.h"
-#include "engine/models/qwen3_asr/loader.h"
-#include "engine/models/qwen3_forced_aligner/loader.h"
-#include "engine/models/qwen3_tts/loader.h"
-#include "engine/models/silero_vad/session.h"
-#include "engine/models/seed_vc/loader.h"
-#include "engine/models/sortformer_diar/loader.h"
-#include "engine/models/vevo2/loader.h"
-#include "engine/models/vibevoice/loader.h"
-#include "engine/models/voxcpm2/loader.h"
 
 #include <algorithm>
 #include <cctype>
@@ -205,31 +180,7 @@ ModelRegistry make_registry_from_config(
 
 ModelRegistry make_default_registry(const std::optional<std::filesystem::path> & config_path) {
     const std::vector<std::shared_ptr<IVoiceModelLoader>> available_loaders = {
-        // Development registry entries from Share/AudioCPP that are not present in this release tree yet:
-        // engine::models::kokoro_tts::make_kokoro_tts_loader(),
-        // engine::models::ace_step::make_ace_step_loader(),
-        // engine::models::demucs::make_htdemucs_loader(),
-        // engine::models::roformer::make_mel_loader(),
-        // engine::models::moss_tts::make_moss_tts_loader(),
-        // engine::models::heartmula::make_heartmula_loader(),
-        // engine::models::parakeet_tdt::make_parakeet_tdt_loader(),
         engine::models::higgs_tts::make_higgs_tts_loader(),
-        engine::models::omnivoice::make_omnivoice_loader(),
-        engine::models::miocodec::make_miocodec_loader(),
-        engine::models::miotts::make_miotts_loader(),
-        engine::models::voxcpm2::make_voxcpm2_loader(),
-        engine::models::vibevoice::make_vibevoice_loader(),
-        engine::models::pocket_tts::make_pocket_tts_loader(),
-        engine::models::qwen3_forced_aligner::make_qwen3_forced_aligner_loader(),
-        engine::models::qwen3_asr::make_qwen3_asr_loader(),
-        engine::models::qwen3_tts::make_qwen3_tts_loader(),
-        engine::models::sortformer_diar::make_sortformer_diar_loader(),
-        engine::models::silero_vad::make_silero_vad_loader(),
-        engine::models::citrinet_asr::make_citrinet_asr_loader(),
-        engine::models::marblenet_vad::make_marblenet_vad_loader(),
-        engine::models::vevo2::make_vevo2_loader(),
-        engine::models::seed_vc::make_seed_vc_loader(),
-        engine::models::chatterbox::make_chatterbox_loader(),
     };
     if (!config_path.has_value()) {
         ModelRegistry registry;
