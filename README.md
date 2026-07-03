@@ -9,7 +9,10 @@
 
 [中文说明](README_ZH.md)
 
-Author: [Saganaki22](https://github.com/Saganaki22)
+
+https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
+
+
 
 Higgs Audio v3 Studio `0.1.0` is a Windows desktop app built with Rust/Tauri for
 local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
