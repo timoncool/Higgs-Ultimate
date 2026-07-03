@@ -12,9 +12,9 @@
 Author: [Saganaki22](https://github.com/Saganaki22)
 
 Higgs Audio v3 Studio `0.1.0` is a Windows desktop app built with Rust/Tauri for
-local Higgs Audio v3 TTS inference through a native C++/CUDA engine. The app does
-not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust loads
-`audiocpp_engine.dll` with `libloading`, and the DLL executes the native
+local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
+app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
+loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
 inference path through a small C ABI.
 
 The goal is simple: a practical desktop workflow for local TTS, voice cloning,
@@ -70,20 +70,14 @@ drbaph/Higgs-Audio-v3-Studio/
     SHA256SUMS.txt
 ```
 
-The staged local upload folder currently mirrors that layout at:
-
-```text
-C:\Users\drbaph\Documents\audio.cpp\models\
-```
-
-Upload that folder to the Hugging Face repo root so the runtime links resolve
-under `/resolve/main/...`.
+Upload your local Hugging Face staging folder with this same structure to the
+Hugging Face repo root so the runtime links resolve under `/resolve/main/...`.
 
 </details>
 
 ## What It Does
 
-- Runs the native `audio.cpp` Higgs Audio v3 engine inside a Tauri desktop app.
+- Runs the ported Higgs Audio v3 C++/CUDA engine inside a Tauri desktop app.
 - Supports normal TTS, voice cloning, speech continuation, and multi-speaker workflows.
 - Supports reference voice drag/drop, replacement, waveform previews, and remove buttons.
 - Supports optional Whisper auto-transcription for reference transcripts.
@@ -132,7 +126,7 @@ Tauri Web UI
   -> Rust command layer
     -> libloading + Windows DLL search path setup
       -> audiocpp_engine.dll C API
-        -> audio.cpp C++ runtime
+        -> ported Higgs Audio v3 C++ runtime
           -> ggml / CUDA backend
             -> Higgs Audio v3 TTS, voice clone, continuation
 ```
@@ -525,7 +519,7 @@ scripts/build_windows.ps1      Windows CMake/MSVC build helper
 
 This desktop app builds on:
 
-- `audio.cpp`, the native C++ audio inference framework in this repository.
+- The ported Higgs Audio v3 C++/CUDA engine implemented for this Studio app.
 - `ggml`, used by the native backend.
 - `whisper.cpp`, used for optional local transcription.
 - Higgs Audio v3 model work from Boson AI.
