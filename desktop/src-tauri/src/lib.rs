@@ -137,15 +137,16 @@ fn is_higgs_asset_root(path: &Path) -> bool {
     path.join("config.json").exists() && path.join("tokenizer.json").exists()
 }
 
-fn configure_higgs_asset_env_from_resource_dir(resource_dir: Option<PathBuf>) {
-    if std::env::var_os("HIGGS_TTS_SMALL_ASSETS_ROOT")
-        .map(|value| is_higgs_asset_root(&PathBuf::from(value)))
-        .unwrap_or(false)
-    {
-        return;
+fn higgs_asset_candidates(resource_dir: Option<PathBuf>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(value) = std::env::var_os("HIGGS_TTS_SMALL_ASSETS_ROOT") {
+        candidates.push(PathBuf::from(value));
+    }
+    if let Some(value) = std::env::var_os("HIGGS_TTS_ASSETS_ROOT") {
+        candidates.push(PathBuf::from(value));
     }
 
-    let mut candidates = Vec::new();
     if let Some(resource_dir) = resource_dir {
         let bundled_assets = resource_dir.join("higgs-assets");
         candidates.push(bundled_assets.join("higgs-audio-v3-tts-4b"));
@@ -158,11 +159,19 @@ fn configure_higgs_asset_env_from_resource_dir(resource_dir: Option<PathBuf>) {
     candidates.push(dev_assets.join("higgs-audio-v3-tts-4b"));
     candidates.push(dev_assets);
 
-    if let Some(root) = candidates
+    candidates
+}
+
+fn find_higgs_asset_root(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
+    higgs_asset_candidates(resource_dir)
         .into_iter()
         .find(|path| is_higgs_asset_root(path))
-    {
-        std::env::set_var("HIGGS_TTS_SMALL_ASSETS_ROOT", root);
+}
+
+fn configure_higgs_asset_env_from_resource_dir(resource_dir: Option<PathBuf>) {
+    if let Some(root) = find_higgs_asset_root(resource_dir) {
+        std::env::set_var("HIGGS_TTS_SMALL_ASSETS_ROOT", &root);
+        std::env::set_var("HIGGS_TTS_ASSETS_ROOT", root);
     }
 }
 
@@ -172,6 +181,97 @@ fn configure_higgs_asset_env(app: &App) {
 
 fn configure_higgs_asset_env_for_handle(app: &AppHandle) {
     configure_higgs_asset_env_from_resource_dir(app.path().resource_dir().ok());
+}
+
+fn model_assets_dest_root(model_path: &str) -> PathBuf {
+    let path = PathBuf::from(model_path);
+    if path.is_file() {
+        return path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.clone());
+    }
+
+    let looks_like_weight = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| {
+            extension.eq_ignore_ascii_case("gguf") || extension.eq_ignore_ascii_case("safetensors")
+        })
+        .unwrap_or(false);
+
+    if looks_like_weight {
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.clone())
+    } else {
+        path
+    }
+}
+
+fn copy_dir_contents(src: &Path, dest: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("{}: {e}", src.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_contents(&src_path, &dest_path)?;
+        } else if !dest_path.exists() {
+            std::fs::copy(&src_path, &dest_path)
+                .map_err(|e| format!("{} -> {}: {e}", src_path.display(), dest_path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_higgs_assets_in_model_dir(app: &AppHandle, model_path: &str) -> Result<(), String> {
+    let dest_root = model_assets_dest_root(model_path);
+    if is_higgs_asset_root(&dest_root) {
+        return Ok(());
+    }
+
+    let Some(source_root) = find_higgs_asset_root(app.path().resource_dir().ok()) else {
+        return Ok(());
+    };
+
+    if dest_root.exists() {
+        let source_canonical = source_root.canonicalize().ok();
+        let dest_canonical = dest_root.canonicalize().ok();
+        if source_canonical.is_some() && source_canonical == dest_canonical {
+            return Ok(());
+        }
+    }
+
+    std::fs::create_dir_all(&dest_root).map_err(|e| {
+        format!(
+            "Higgs TTS assets are missing and the app could not create {}: {e}",
+            dest_root.display()
+        )
+    })?;
+
+    for filename in [
+        "config.json",
+        "tokenizer_config.json",
+        "tokenizer.json",
+        "higgs_audio_v2_tokenizer_config.json",
+        "chat_template.jinja",
+        "LICENSE",
+    ] {
+        let source = source_root.join(filename);
+        let dest = dest_root.join(filename);
+        if source.exists() && !dest.exists() {
+            std::fs::copy(&source, &dest)
+                .map_err(|e| format!("{} -> {}: {e}", source.display(), dest.display()))?;
+        }
+    }
+
+    let source_assets = source_root.join("assets");
+    if source_assets.exists() {
+        copy_dir_contents(&source_assets, &dest_root.join("assets"))?;
+    }
+
+    Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -194,7 +294,10 @@ fn engine_status(state: State<'_, AppState>) -> serde_json::Value {
 #[tauri::command]
 fn engine_version(state: State<'_, AppState>) -> String {
     let guard = state.engine.lock().unwrap();
-    guard.as_ref().map(|e| e.version()).unwrap_or_else(|| "engine not loaded".into())
+    guard
+        .as_ref()
+        .map(|e| e.version())
+        .unwrap_or_else(|| "engine not loaded".into())
 }
 
 #[tauri::command]
@@ -272,7 +375,10 @@ async fn load_engine(
         }
     }
 
-    let _ = app.emit("model-status", serde_json::json!({ "engineLoaded": true, "modelLoaded": false }));
+    let _ = app.emit(
+        "model-status",
+        serde_json::json!({ "engineLoaded": true, "modelLoaded": false }),
+    );
     Ok(serde_json::json!({ "success": true, "version": version }))
 }
 
@@ -284,7 +390,10 @@ fn unload_engine(app: AppHandle, state: State<'_, AppState>) -> Result<(), Strin
     }
     *guard = None;
     drop(guard);
-    let _ = app.emit("model-status", serde_json::json!({ "engineLoaded": false, "modelLoaded": false }));
+    let _ = app.emit(
+        "model-status",
+        serde_json::json!({ "engineLoaded": false, "modelLoaded": false }),
+    );
     Ok(())
 }
 
@@ -299,6 +408,7 @@ async fn load_model(
     request: LoadModelRequest,
 ) -> Result<serde_json::Value, String> {
     configure_higgs_asset_env_for_handle(&app);
+    ensure_higgs_assets_in_model_dir(&app, &request.model_root)?;
 
     let engine = {
         let guard = state.engine.lock().unwrap();
@@ -311,13 +421,16 @@ async fn load_model(
         .map_err(|e| format!("task join error: {e}"))?
         .map_err(|e| map_engine_err(&e))?;
 
-    let _ = app_clone.emit("model-status", serde_json::json!({
-        "engineLoaded": true,
-        "modelLoaded": true,
-        "family": result.family,
-        "displayName": result.display_name,
-        "weightType": result.weight_type,
-    }));
+    let _ = app_clone.emit(
+        "model-status",
+        serde_json::json!({
+            "engineLoaded": true,
+            "modelLoaded": true,
+            "family": result.family,
+            "displayName": result.display_name,
+            "weightType": result.weight_type,
+        }),
+    );
 
     Ok(serde_json::json!({
         "success": true,
@@ -336,7 +449,10 @@ fn unload_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String
     let engine = guard.as_ref().ok_or("engine not loaded")?;
     engine.unload_model();
     drop(guard);
-    let _ = app.emit("model-status", serde_json::json!({ "engineLoaded": true, "modelLoaded": false }));
+    let _ = app.emit(
+        "model-status",
+        serde_json::json!({ "engineLoaded": true, "modelLoaded": false }),
+    );
     Ok(())
 }
 
@@ -360,9 +476,12 @@ fn cancel_generation(state: State<'_, AppState>) -> Result<(), String> {
 fn build_progress(app: &AppHandle) -> ProgressCallback {
     let app = app.clone();
     Arc::new(move |current: i32, total: i32, phase: &str| {
-        let _ = app.emit("generation-progress", serde_json::json!({
-            "current": current, "total": total, "phase": phase,
-        }));
+        let _ = app.emit(
+            "generation-progress",
+            serde_json::json!({
+                "current": current, "total": total, "phase": phase,
+            }),
+        );
     })
 }
 
@@ -409,7 +528,11 @@ async fn generate_voice_clone(
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         engine.generate_voice_clone(
-            &request.text, &ref_wav, request.ref_text.as_deref(), &options, progress,
+            &request.text,
+            &ref_wav,
+            request.ref_text.as_deref(),
+            &options,
+            progress,
         )
     })
     .await
@@ -438,7 +561,10 @@ async fn generate_finish_sentence(
 
     let result = tauri::async_runtime::spawn_blocking(move || {
         engine.generate_finish_sentence(
-            &audio_wav, request.continuation_text.as_deref(), &options, progress,
+            &audio_wav,
+            request.continuation_text.as_deref(),
+            &options,
+            progress,
         )
     })
     .await
@@ -480,11 +606,19 @@ async fn transcribe_audio(
 
     let status = status.map_err(|e| e.to_string())?;
     if status != 0 {
-        let msg = String::from_utf8_lossy(&out_text).trim_end_matches('\0').to_string();
-        return Err(if msg.is_empty() { format!("transcribe failed (code {status})") } else { msg });
+        let msg = String::from_utf8_lossy(&out_text)
+            .trim_end_matches('\0')
+            .to_string();
+        return Err(if msg.is_empty() {
+            format!("transcribe failed (code {status})")
+        } else {
+            msg
+        });
     }
 
-    let text = String::from_utf8_lossy(&out_text).trim_end_matches('\0').to_string();
+    let text = String::from_utf8_lossy(&out_text)
+        .trim_end_matches('\0')
+        .to_string();
     Ok(serde_json::json!({ "text": text }))
 }
 
@@ -593,11 +727,17 @@ fn open_external_url(url: String) -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open").arg(&url).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open").arg(&url).spawn().map_err(|e| e.to_string())?;
+        std::process::Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -673,9 +813,9 @@ fn hardware_snapshot(state: State<'_, AppState>) -> HardwareSnapshot {
                     snap.gpu_utilization = util.gpu as f64;
                 }
 
-                if let Ok(temp) = device.temperature(
-                    nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu,
-                ) {
+                if let Ok(temp) =
+                    device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
+                {
                     snap.temperature = temp as f64;
                 }
 
@@ -715,8 +855,7 @@ fn hardware_snapshot(state: State<'_, AppState>) -> HardwareSnapshot {
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
@@ -740,8 +879,7 @@ fn base64_encode(data: &[u8]) -> String {
 }
 
 fn base64_decode(input: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    const ALPHABET: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut lookup = [255u8; 256];
     for (i, &c) in ALPHABET.iter().enumerate() {
         lookup[c as usize] = i as u8;
@@ -751,9 +889,13 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let mut buffer: u32 = 0;
     let mut bits: u32 = 0;
     for &byte in input_bytes {
-        if byte == b'=' { break; }
+        if byte == b'=' {
+            break;
+        }
         let val = lookup[byte as usize];
-        if val == 255 { continue; }
+        if val == 255 {
+            continue;
+        }
         buffer = (buffer << 6) | val as u32;
         bits += 6;
         if bits >= 8 {
