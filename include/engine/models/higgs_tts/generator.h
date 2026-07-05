@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 namespace engine::models::higgs_tts {
@@ -26,6 +27,8 @@ struct HiggsTTSGeneratedCodes {
     HiggsAudioCodeMatrix raw_codes;
 };
 
+using HiggsTTSCodeStreamCallback = std::function<bool(const HiggsAudioCodeMatrix & delayed_codes, bool is_final)>;
+
 class HiggsTTSGeneratorRuntime {
 public:
     struct Impl;
@@ -42,7 +45,8 @@ public:
     HiggsTTSGeneratedCodes generate(
         const HiggsTTSPrompt & prompt,
         const HiggsTTSGenerationOptions & options,
-        const HiggsAudioCodeMatrix * reference_delayed_codes = nullptr);
+        const HiggsAudioCodeMatrix * reference_delayed_codes = nullptr,
+        const HiggsTTSCodeStreamCallback * code_stream = nullptr);
 
 private:
     std::unique_ptr<Impl> impl_;

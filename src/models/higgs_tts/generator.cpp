@@ -1057,7 +1057,8 @@ struct HiggsTTSGeneratorRuntime::Impl {
     HiggsTTSGeneratedCodes generate(
         const HiggsTTSPrompt & prompt,
         const HiggsTTSGenerationOptions & options,
-        const HiggsAudioCodeMatrix * reference_delayed_codes) {
+        const HiggsAudioCodeMatrix * reference_delayed_codes,
+        const HiggsTTSCodeStreamCallback * code_stream) {
         const auto & config = weights->assets().config;
         if (prompt.input_ids.empty()) {
             throw std::runtime_error("Higgs TTS generator prompt is empty");
@@ -1118,6 +1119,11 @@ struct HiggsTTSGeneratorRuntime::Impl {
             if (!codes.empty() && codes.front() != kHiggsAudioStopCode) {
                 delayed.token_ids.insert(delayed.token_ids.end(), codes.begin(), codes.end());
                 ++delayed.frames;
+                if (code_stream != nullptr && delayed.frames >= delayed.codebooks) {
+                    if (!(*code_stream)(delayed, false)) {
+                        throw std::runtime_error("generation cancelled");
+                    }
+                }
             }
             if (sampler.generation_done) {
                 break;
@@ -1138,6 +1144,11 @@ struct HiggsTTSGeneratorRuntime::Impl {
         debug::trace_log_scalar("higgs_tts.generator.delayed_rows", delayed.frames);
         if (delayed.frames < delayed.codebooks) {
             throw std::runtime_error("Higgs TTS generated too few audio-code rows");
+        }
+        if (code_stream != nullptr) {
+            if (!(*code_stream)(delayed, true)) {
+                throw std::runtime_error("generation cancelled");
+            }
         }
         HiggsTTSGeneratedCodes out;
         out.delayed_codes = std::move(delayed);
@@ -1173,8 +1184,10 @@ HiggsTTSGeneratorRuntime::~HiggsTTSGeneratorRuntime() = default;
 HiggsTTSGeneratedCodes HiggsTTSGeneratorRuntime::generate(
     const HiggsTTSPrompt & prompt,
     const HiggsTTSGenerationOptions & options,
-    const HiggsAudioCodeMatrix * reference_delayed_codes) {
-    return impl_->generate(prompt, options, reference_delayed_codes);
+    const HiggsAudioCodeMatrix * reference_delayed_codes,
+    const HiggsTTSCodeStreamCallback * code_stream) {
+    return impl_->generate(prompt, options, reference_delayed_codes, code_stream);
 }
+
 
 }  // namespace engine::models::higgs_tts

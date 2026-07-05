@@ -1,6 +1,6 @@
 [package]
 name = "higgs-audio-studio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tauri shell for the ported Higgs Audio v3 C++ engine"
 authors = ["Higgs Audio v3 Studio"]
 edition = "2021"
@@ -19,10 +19,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "aac", "isomp4"] }
 sysinfo = "0.32"
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-dialog = "2"
 thiserror = "2"
 ureq = { version = "3", features = ["json"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

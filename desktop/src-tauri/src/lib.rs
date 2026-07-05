@@ -2,24 +2,40 @@ mod audio;
 mod download;
 mod engine;
 
-use engine::{Engine, EngineError, GenerateRequest, LoadModelRequest, ProgressCallback};
+use engine::{
+    AudioChunkCallback, AudioResult, Engine, EngineError, GenerateRequest, LoadModelRequest,
+    ProgressCallback,
+};
 use nvml_wrapper::Nvml;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::io::{Read, Seek, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use sysinfo::{Pid, System};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Emitter, Manager, State};
+
+static STUDIO_JOB_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// The engine is stored as Arc<Engine> inside the mutex. When a generate call
 /// needs to run, it clones the Arc out of the lock and releases the mutex —
 /// the engine stays alive for the duration of the call even if the UI triggers
 /// an unload concurrently.
 struct AppState {
-    engine: Mutex<Option<Arc<Engine>>>,
+    engine: Arc<Mutex<Option<Arc<Engine>>>>,
     engine_dir: Mutex<PathBuf>,
     nvml: Mutex<Option<Nvml>>,
     sys: Mutex<System>,
+    download_control: Arc<download::DownloadControl>,
+    api_server: Mutex<Option<ApiServerHandle>>,
+    api_speakers: Arc<Mutex<Vec<ApiSpeakerPersona>>>,
+    generation_queue: Arc<Mutex<()>>,
+    minimize_to_tray: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -31,6 +47,122 @@ impl AppState {
         let guard = self.engine.lock().unwrap();
         (*guard).clone().ok_or("engine not loaded".to_string())
     }
+}
+
+#[derive(Clone)]
+struct ApiServerHandle {
+    stop: Arc<AtomicBool>,
+    host: String,
+    port: u16,
+    api_key: String,
+    started_at: Instant,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiServerConfig {
+    host: String,
+    port: u16,
+    api_key: String,
+    speakers: Option<Vec<ApiSpeakerPersona>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiSpeakerPersona {
+    id: String,
+    name: String,
+    ref_path: String,
+    ref_text: String,
+    #[serde(default)]
+    cache_path: String,
+    #[serde(default)]
+    normalize: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpeakerArchivePersona {
+    id: String,
+    name: String,
+    ref_path: String,
+    ref_name: String,
+    ref_text: String,
+    notes: String,
+    photo_path: String,
+    #[serde(default)]
+    cache_path: String,
+    #[serde(default)]
+    normalize: bool,
+    created_at: u64,
+    updated_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiLogEvent {
+    level: String,
+    kind: String,
+    method: String,
+    route: String,
+    status: u16,
+    latency_ms: u128,
+    message: String,
+    job_id: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StudioJobEvent {
+    id: String,
+    source: String,
+    workflow: String,
+    status: String,
+    label: String,
+    phase: String,
+    current: Option<i32>,
+    total: Option<i32>,
+    message: String,
+}
+
+fn next_studio_job_id(source: &str) -> String {
+    let seq = STUDIO_JOB_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{source}-{}-{seq}", chrono_like_millis())
+}
+
+fn chrono_like_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+fn emit_studio_job(
+    app: &AppHandle,
+    id: &str,
+    source: &str,
+    workflow: &str,
+    status: &str,
+    label: &str,
+    phase: &str,
+    current: Option<i32>,
+    total: Option<i32>,
+    message: &str,
+) {
+    let _ = app.emit(
+        "studio-job",
+        StudioJobEvent {
+            id: id.to_string(),
+            source: source.to_string(),
+            workflow: workflow.to_string(),
+            status: status.to_string(),
+            label: label.to_string(),
+            phase: phase.to_string(),
+            current,
+            total,
+            message: message.to_string(),
+        },
+    );
 }
 
 fn engine_filename() -> &'static str {
@@ -284,10 +416,15 @@ fn engine_status(state: State<'_, AppState>) -> serde_json::Value {
     let engine_loaded = guard.is_some();
     let model_loaded = guard.as_ref().map(|e| e.is_model_loaded()).unwrap_or(false);
     let generating = guard.as_ref().map(|e| e.is_generating()).unwrap_or(false);
+    let supports_streaming = guard
+        .as_ref()
+        .map(|e| e.supports_streaming())
+        .unwrap_or(false);
     serde_json::json!({
         "engineLoaded": engine_loaded,
         "modelLoaded": model_loaded,
         "generating": generating,
+        "supportsStreaming": supports_streaming,
     })
 }
 
@@ -313,8 +450,9 @@ async fn download_engine_dll(
 ) -> Result<serde_json::Value, String> {
     let dest_dir = state.engine_dir();
     let filename = engine_filename();
+    let control = state.download_control.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        download::download_file(&url, &dest_dir, Some(filename), &app)
+        download::download_file(&url, &dest_dir, Some(filename), &app, control)
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
@@ -363,6 +501,7 @@ async fn load_engine(
         .map_err(|e| e.to_string())?;
 
     let version = engine.version();
+    let supports_streaming = engine.supports_streaming();
     *state.engine.lock().unwrap() = Some(Arc::new(engine));
 
     // Initialize NVML for hardware monitoring.
@@ -377,9 +516,17 @@ async fn load_engine(
 
     let _ = app.emit(
         "model-status",
-        serde_json::json!({ "engineLoaded": true, "modelLoaded": false }),
+        serde_json::json!({
+            "engineLoaded": true,
+            "modelLoaded": false,
+            "supportsStreaming": supports_streaming,
+        }),
     );
-    Ok(serde_json::json!({ "success": true, "version": version }))
+    Ok(serde_json::json!({
+        "success": true,
+        "version": version,
+        "supportsStreaming": supports_streaming,
+    }))
 }
 
 #[tauri::command]
@@ -392,7 +539,11 @@ fn unload_engine(app: AppHandle, state: State<'_, AppState>) -> Result<(), Strin
     drop(guard);
     let _ = app.emit(
         "model-status",
-        serde_json::json!({ "engineLoaded": false, "modelLoaded": false }),
+        serde_json::json!({
+            "engineLoaded": false,
+            "modelLoaded": false,
+            "supportsStreaming": false,
+        }),
     );
     Ok(())
 }
@@ -414,6 +565,7 @@ async fn load_model(
         let guard = state.engine.lock().unwrap();
         guard.as_ref().ok_or("engine not loaded")?.clone()
     };
+    let supports_streaming = engine.supports_streaming();
 
     let app_clone = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || engine.load_model(&request))
@@ -426,6 +578,7 @@ async fn load_model(
         serde_json::json!({
             "engineLoaded": true,
             "modelLoaded": true,
+            "supportsStreaming": supports_streaming,
             "family": result.family,
             "displayName": result.display_name,
             "weightType": result.weight_type,
@@ -447,11 +600,16 @@ async fn load_model(
 fn unload_model(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let guard = state.engine.lock().unwrap();
     let engine = guard.as_ref().ok_or("engine not loaded")?;
+    let supports_streaming = engine.supports_streaming();
     engine.unload_model();
     drop(guard);
     let _ = app.emit(
         "model-status",
-        serde_json::json!({ "engineLoaded": true, "modelLoaded": false }),
+        serde_json::json!({
+            "engineLoaded": true,
+            "modelLoaded": false,
+            "supportsStreaming": supports_streaming,
+        }),
     );
     Ok(())
 }
@@ -485,6 +643,69 @@ fn build_progress(app: &AppHandle) -> ProgressCallback {
     })
 }
 
+fn build_audio_chunk(app: &AppHandle) -> AudioChunkCallback {
+    let app = app.clone();
+    Arc::new(
+        move |sample_rate: i32,
+              channels: i32,
+              start_sample: i64,
+              samples: &[f32],
+              is_final: bool| {
+            let wav_base64 = AudioResult {
+                sample_rate,
+                channels,
+                samples: samples.to_vec(),
+            }
+            .encode_base64_wav();
+            let _ = app.emit(
+                "generation-audio-chunk",
+                serde_json::json!({
+                    "sampleRate": sample_rate,
+                    "channels": channels,
+                    "startSample": start_sample,
+                    "sampleCount": samples.len(),
+                    "wavBase64": wav_base64,
+                    "isFinal": is_final,
+                }),
+            );
+        },
+    )
+}
+
+fn noop_audio_chunk() -> AudioChunkCallback {
+    Arc::new(|_, _, _, _, _| {})
+}
+
+fn option_bool(options: &serde_json::Value, key: &str) -> bool {
+    options
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+fn set_bool_option(options: &mut serde_json::Value, key: &str, value: bool) {
+    if let Some(map) = options.as_object_mut() {
+        map.insert(key.to_string(), serde_json::json!(value));
+    }
+}
+
+fn set_string_option(options: &mut serde_json::Value, key: &str, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+    if let Some(map) = options.as_object_mut() {
+        map.insert(key.to_string(), serde_json::json!(value));
+    }
+}
+
+fn prepare_reference_audio(path: &str, options: &serde_json::Value) -> Result<String, String> {
+    if option_bool(options, "normalize_reference") {
+        audio::normalize_to_temp_wav(path, 0.95).map_err(|e| e.to_string())
+    } else {
+        audio::ensure_wav(path).map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 async fn generate_tts(
     app: AppHandle,
@@ -492,11 +713,31 @@ async fn generate_tts(
     request: GenerateRequest,
 ) -> Result<serde_json::Value, String> {
     let engine = state.clone_engine()?;
-    let options = request.options.unwrap_or(serde_json::json!({}));
+    let queue = state.generation_queue.clone();
+    let mut options = request.options.unwrap_or(serde_json::json!({}));
+    let stream_playback_enabled = option_bool(&options, "stream_playback");
+    let stream_backend = engine.supports_streaming();
+    set_bool_option(
+        &mut options,
+        "emit_stream_audio_chunks",
+        stream_playback_enabled,
+    );
     let progress = build_progress(&app);
+    let audio_chunk = if stream_playback_enabled {
+        build_audio_chunk(&app)
+    } else {
+        noop_audio_chunk()
+    };
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        engine.generate_tts(&request.text, &options, progress)
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<_, EngineError> {
+        let _queue = queue
+            .lock()
+            .map_err(|_| EngineError::Generation("generation queue poisoned".into()))?;
+        if stream_backend {
+            engine.generate_tts_stream(&request.text, &options, progress, audio_chunk)
+        } else {
+            engine.generate_tts(&request.text, &options, progress)
+        }
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
@@ -521,19 +762,45 @@ async fn generate_voice_clone(
         .ref_audio_path
         .clone()
         .ok_or("ref_audio_path is required for voice clone")?;
-    // Convert non-WAV to temp WAV if needed
-    let ref_wav = audio::ensure_wav(&ref_path).map_err(|e| e.to_string())?;
-    let options = request.options.unwrap_or(serde_json::json!({}));
+    let queue = state.generation_queue.clone();
+    let mut options = request.options.unwrap_or(serde_json::json!({}));
+    let ref_wav = prepare_reference_audio(&ref_path, &options)?;
+    let stream_playback_enabled = option_bool(&options, "stream_playback");
+    let stream_backend = engine.supports_streaming();
+    set_bool_option(
+        &mut options,
+        "emit_stream_audio_chunks",
+        stream_playback_enabled,
+    );
     let progress = build_progress(&app);
+    let audio_chunk = if stream_playback_enabled {
+        build_audio_chunk(&app)
+    } else {
+        noop_audio_chunk()
+    };
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        engine.generate_voice_clone(
-            &request.text,
-            &ref_wav,
-            request.ref_text.as_deref(),
-            &options,
-            progress,
-        )
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<_, EngineError> {
+        let _queue = queue
+            .lock()
+            .map_err(|_| EngineError::Generation("generation queue poisoned".into()))?;
+        if stream_backend {
+            engine.generate_voice_clone_stream(
+                &request.text,
+                &ref_wav,
+                request.ref_text.as_deref(),
+                &options,
+                progress,
+                audio_chunk,
+            )
+        } else {
+            engine.generate_voice_clone(
+                &request.text,
+                &ref_wav,
+                request.ref_text.as_deref(),
+                &options,
+                progress,
+            )
+        }
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
@@ -554,18 +821,43 @@ async fn generate_finish_sentence(
     request: engine::FinishSentenceRequest,
 ) -> Result<serde_json::Value, String> {
     let engine = state.clone_engine()?;
-    // Convert non-WAV to temp WAV if needed
-    let audio_wav = audio::ensure_wav(&request.audio_path).map_err(|e| e.to_string())?;
-    let options = request.options.unwrap_or(serde_json::json!({}));
+    let queue = state.generation_queue.clone();
+    let mut options = request.options.unwrap_or(serde_json::json!({}));
+    let audio_wav = prepare_reference_audio(&request.audio_path, &options)?;
+    let stream_playback_enabled = option_bool(&options, "stream_playback");
+    let stream_backend = engine.supports_streaming();
+    set_bool_option(
+        &mut options,
+        "emit_stream_audio_chunks",
+        stream_playback_enabled,
+    );
     let progress = build_progress(&app);
+    let audio_chunk = if stream_playback_enabled {
+        build_audio_chunk(&app)
+    } else {
+        noop_audio_chunk()
+    };
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        engine.generate_finish_sentence(
-            &audio_wav,
-            request.continuation_text.as_deref(),
-            &options,
-            progress,
-        )
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<_, EngineError> {
+        let _queue = queue
+            .lock()
+            .map_err(|_| EngineError::Generation("generation queue poisoned".into()))?;
+        if stream_backend {
+            engine.generate_finish_sentence_stream(
+                &audio_wav,
+                request.continuation_text.as_deref(),
+                &options,
+                progress,
+                audio_chunk,
+            )
+        } else {
+            engine.generate_finish_sentence(
+                &audio_wav,
+                request.continuation_text.as_deref(),
+                &options,
+                progress,
+            )
+        }
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
@@ -626,11 +918,9 @@ async fn transcribe_audio(
 // Model listing / download
 // ═══════════════════════════════════════════════════════════════════════════
 
-#[tauri::command]
-fn list_models(_state: State<'_, AppState>) -> Vec<download::ModelListing> {
+fn model_listing_candidates() -> Vec<PathBuf> {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-
-    let candidates = [
+    vec![
         exe.parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("models"))
@@ -641,11 +931,13 @@ fn list_models(_state: State<'_, AppState>) -> Vec<download::ModelListing> {
             .join("..")
             .join("models")
             .join("models"),
-    ];
+    ]
+}
 
+fn list_all_models() -> Vec<download::ModelListing> {
     let mut seen = HashSet::new();
     let mut listings = Vec::new();
-    for root in candidates {
+    for root in model_listing_candidates() {
         if !root.exists() {
             continue;
         }
@@ -660,13 +952,26 @@ fn list_models(_state: State<'_, AppState>) -> Vec<download::ModelListing> {
 }
 
 #[tauri::command]
+fn list_models(_state: State<'_, AppState>) -> Vec<download::ModelListing> {
+    list_all_models()
+}
+
+#[tauri::command]
 async fn download_model(
     app: AppHandle,
+    state: State<'_, AppState>,
     request: download::DownloadRequest,
 ) -> Result<serde_json::Value, String> {
     let dest_dir = resolve_download_dest_dir(&request.dest_dir);
+    let control = state.download_control.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        download::download_file(&request.url, &dest_dir, request.filename.as_deref(), &app)
+        download::download_file(
+            &request.url,
+            &dest_dir,
+            request.filename.as_deref(),
+            &app,
+            control,
+        )
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
@@ -674,9 +979,1751 @@ async fn download_model(
     Ok(serde_json::json!({ "path": result.path, "size": result.size }))
 }
 
+#[tauri::command]
+fn download_control(
+    state: State<'_, AppState>,
+    action: String,
+) -> Result<serde_json::Value, String> {
+    match action.as_str() {
+        "pause" => state.download_control.pause(),
+        "resume" => state.download_control.resume(),
+        "cancel" | "stop" => state.download_control.cancel(),
+        _ => return Err(format!("unknown download action: {action}")),
+    }
+    Ok(serde_json::json!({
+        "active": state.download_control.is_active(),
+        "paused": state.download_control.is_paused(),
+    }))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Local API server
+// ═══════════════════════════════════════════════════════════════════════════
+
+struct HttpRequest {
+    method: String,
+    route: String,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+fn emit_api_log(
+    app: &AppHandle,
+    level: &str,
+    kind: &str,
+    method: &str,
+    route: &str,
+    status: u16,
+    latency_ms: u128,
+    message: &str,
+) {
+    let _ = app.emit(
+        "api-log",
+        ApiLogEvent {
+            level: level.to_string(),
+            kind: kind.to_string(),
+            method: method.to_string(),
+            route: route.to_string(),
+            status,
+            latency_ms,
+            message: message.to_string(),
+            job_id: String::new(),
+        },
+    );
+}
+
+fn http_reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        204 => "No Content",
+        400 => "Bad Request",
+        401 => "Unauthorized",
+        404 => "Not Found",
+        409 => "Conflict",
+        500 => "Internal Server Error",
+        501 => "Not Implemented",
+        _ => "OK",
+    }
+}
+
+fn write_http_response(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u8]) {
+    let header = format!(
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Headers: Authorization, Content-Type\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nConnection: close\r\n\r\n",
+        status,
+        http_reason(status),
+        content_type,
+        body.len()
+    );
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(body);
+}
+
+fn json_response(value: serde_json::Value) -> (u16, &'static str, Vec<u8>, String) {
+    (
+        200,
+        "application/json",
+        serde_json::to_vec(&value).unwrap_or_else(|_| b"{}".to_vec()),
+        "ok".to_string(),
+    )
+}
+
+fn json_error(
+    status: u16,
+    code: &str,
+    message: impl Into<String>,
+) -> (u16, &'static str, Vec<u8>, String) {
+    let message = message.into();
+    (
+        status,
+        "application/json",
+        serde_json::to_vec(&serde_json::json!({
+            "error": {
+                "code": code,
+                "message": message,
+            }
+        }))
+        .unwrap_or_else(|_| b"{\"error\":{\"message\":\"error\"}}".to_vec()),
+        message,
+    )
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 8192];
+    let mut header_end = None;
+    let mut content_length = 0usize;
+
+    loop {
+        let n = stream.read(&mut tmp).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if header_end.is_none() {
+            header_end = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4);
+            if let Some(end) = header_end {
+                let headers = String::from_utf8_lossy(&buf[..end]);
+                for line in headers.lines() {
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.trim().eq_ignore_ascii_case("content-length") {
+                            content_length = value.trim().parse::<usize>().unwrap_or(0);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(end) = header_end {
+            if buf.len() >= end + content_length {
+                break;
+            }
+        }
+        if buf.len() > 64 * 1024 * 1024 {
+            return Err("request too large".into());
+        }
+    }
+
+    let end = header_end.ok_or_else(|| "missing HTTP headers".to_string())?;
+    let header_text = String::from_utf8_lossy(&buf[..end]);
+    let mut lines = header_text.lines();
+    let request_line = lines
+        .next()
+        .ok_or_else(|| "missing request line".to_string())?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("").to_uppercase();
+    let route = parts
+        .next()
+        .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/")
+        .to_string();
+    if method.is_empty() {
+        return Err("missing HTTP method".into());
+    }
+    let mut headers = Vec::new();
+    for line in lines {
+        if let Some((name, value)) = line.split_once(':') {
+            headers.push((name.trim().to_ascii_lowercase(), value.trim().to_string()));
+        }
+    }
+    let body_end = std::cmp::min(buf.len(), end + content_length);
+    Ok(HttpRequest {
+        method,
+        route,
+        headers,
+        body: buf[end..body_end].to_vec(),
+    })
+}
+
+fn header_value<'a>(req: &'a HttpRequest, name: &str) -> Option<&'a str> {
+    let name = name.to_ascii_lowercase();
+    req.headers
+        .iter()
+        .find(|(key, _)| key == &name)
+        .map(|(_, value)| value.as_str())
+}
+
+fn api_authorized(req: &HttpRequest, api_key: &str) -> bool {
+    header_value(req, "authorization")
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .map(|token| token == api_key)
+        .unwrap_or(false)
+}
+
+fn api_engine_status(engine_state: &Arc<Mutex<Option<Arc<Engine>>>>) -> serde_json::Value {
+    let guard = engine_state.lock().unwrap();
+    let engine_loaded = guard.is_some();
+    let model_loaded = guard.as_ref().map(|e| e.is_model_loaded()).unwrap_or(false);
+    let generating = guard.as_ref().map(|e| e.is_generating()).unwrap_or(false);
+    let supports_streaming = guard
+        .as_ref()
+        .map(|e| e.supports_streaming())
+        .unwrap_or(false);
+    serde_json::json!({
+        "engineLoaded": engine_loaded,
+        "modelLoaded": model_loaded,
+        "generating": generating,
+        "supportsStreaming": supports_streaming,
+    })
+}
+
+fn api_find_speaker<'a>(
+    speakers: &'a [ApiSpeakerPersona],
+    key: &str,
+) -> Option<&'a ApiSpeakerPersona> {
+    let key_lc = key.trim().to_lowercase();
+    speakers
+        .iter()
+        .find(|speaker| speaker.id == key || speaker.name.to_lowercase() == key_lc)
+}
+
+fn api_current_speakers(
+    speakers: &Arc<Mutex<Vec<ApiSpeakerPersona>>>,
+) -> Vec<ApiSpeakerPersona> {
+    speakers
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
+}
+
+fn api_clone_engine(engine_state: &Arc<Mutex<Option<Arc<Engine>>>>) -> Result<Arc<Engine>, String> {
+    engine_state
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "engine not loaded".to_string())
+}
+
+fn api_generation_options(root: &serde_json::Value) -> serde_json::Value {
+    let mut options = serde_json::Map::new();
+    if let Some(higgs) = root.get("higgs").and_then(|v| v.as_object()) {
+        for (key, value) in higgs {
+            options.insert(key.clone(), value.clone());
+        }
+    }
+    for key in [
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "top_k",
+        "seed",
+        "normalize_reference",
+        "reference_cache_path",
+    ] {
+        if let Some(value) = root.get(key) {
+            options.insert(key.to_string(), value.clone());
+        }
+    }
+    serde_json::Value::Object(options)
+}
+
+fn api_job_label(text: &str, fallback: &str) -> String {
+    let label: String = text.trim().chars().take(56).collect();
+    if label.is_empty() {
+        fallback.to_string()
+    } else {
+        label
+    }
+}
+
+fn api_job_progress(
+    app: &AppHandle,
+    job_id: &str,
+    workflow: &str,
+    label: &str,
+) -> ProgressCallback {
+    let app = app.clone();
+    let job_id = job_id.to_string();
+    let workflow = workflow.to_string();
+    let label = label.to_string();
+    Arc::new(move |current, total, phase| {
+        emit_studio_job(
+            &app,
+            &job_id,
+            "api",
+            &workflow,
+            "generating",
+            &label,
+            phase,
+            Some(current),
+            Some(total),
+            phase,
+        );
+    })
+}
+
+fn api_stream_options(mut options: serde_json::Value) -> serde_json::Value {
+    set_bool_option(&mut options, "emit_stream_audio_chunks", false);
+    options
+}
+
+fn api_generate_tts(
+    engine: &Arc<Engine>,
+    text: &str,
+    options: &serde_json::Value,
+    progress: ProgressCallback,
+) -> Result<AudioResult, EngineError> {
+    if engine.supports_streaming() {
+        engine.generate_tts_stream(text, options, progress, noop_audio_chunk())
+    } else {
+        engine.generate_tts(text, options, progress)
+    }
+}
+
+fn api_generate_voice_clone(
+    engine: &Arc<Engine>,
+    text: &str,
+    ref_wav: &str,
+    ref_text: Option<&str>,
+    options: &serde_json::Value,
+    progress: ProgressCallback,
+) -> Result<AudioResult, EngineError> {
+    if engine.supports_streaming() {
+        engine.generate_voice_clone_stream(
+            text,
+            ref_wav,
+            ref_text,
+            options,
+            progress,
+            noop_audio_chunk(),
+        )
+    } else {
+        engine.generate_voice_clone(text, ref_wav, ref_text, options, progress)
+    }
+}
+
+fn api_generate_finish_sentence(
+    engine: &Arc<Engine>,
+    audio_wav: &str,
+    continuation: Option<&str>,
+    options: &serde_json::Value,
+    progress: ProgressCallback,
+) -> Result<AudioResult, EngineError> {
+    if engine.supports_streaming() {
+        engine.generate_finish_sentence_stream(
+            audio_wav,
+            continuation,
+            options,
+            progress,
+            noop_audio_chunk(),
+        )
+    } else {
+        engine.generate_finish_sentence(audio_wav, continuation, options, progress)
+    }
+}
+
+fn write_streaming_response_header(stream: &mut TcpStream) -> Result<(), String> {
+    let header = concat!(
+        "HTTP/1.1 200 OK\r\n",
+        "Content-Type: application/x-ndjson\r\n",
+        "Cache-Control: no-cache\r\n",
+        "X-Accel-Buffering: no\r\n",
+        "Access-Control-Allow-Origin: *\r\n",
+        "Access-Control-Allow-Headers: Authorization, Content-Type\r\n",
+        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n",
+        "Connection: close\r\n\r\n"
+    );
+    stream.write_all(header.as_bytes()).map_err(|e| e.to_string())?;
+    stream.flush().map_err(|e| e.to_string())
+}
+
+fn write_ndjson_event(
+    writer: &Arc<Mutex<TcpStream>>,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let mut bytes = serde_json::to_vec(&value).map_err(|e| e.to_string())?;
+    bytes.push(b'\n');
+    let mut stream = writer.lock().map_err(|_| "stream writer poisoned".to_string())?;
+    stream.write_all(&bytes).map_err(|e| e.to_string())?;
+    stream.flush().map_err(|e| e.to_string())
+}
+
+fn api_stream_audio_callback(writer: Arc<Mutex<TcpStream>>) -> AudioChunkCallback {
+    Arc::new(
+        move |sample_rate: i32,
+              channels: i32,
+              start_sample: i64,
+              samples: &[f32],
+              is_final: bool| {
+            let wav_base64 = AudioResult {
+                sample_rate,
+                channels,
+                samples: samples.to_vec(),
+            }
+            .encode_base64_wav();
+            let _ = write_ndjson_event(
+                &writer,
+                serde_json::json!({
+                    "event": "audio",
+                    "sampleRate": sample_rate,
+                    "channels": channels,
+                    "startSample": start_sample,
+                    "sampleCount": samples.len(),
+                    "isFinalChunk": is_final,
+                    "encoding": "wav-base64",
+                    "wavBase64": wav_base64,
+                }),
+            );
+        },
+    )
+}
+
+fn api_stream_progress_callback(
+    app: &AppHandle,
+    writer: Arc<Mutex<TcpStream>>,
+    job_id: &str,
+    workflow: &str,
+    label: &str,
+) -> ProgressCallback {
+    let app = app.clone();
+    let job_id = job_id.to_string();
+    let workflow = workflow.to_string();
+    let label = label.to_string();
+    Arc::new(move |current, total, phase| {
+        let _ = write_ndjson_event(
+            &writer,
+            serde_json::json!({
+                "event": "progress",
+                "current": current,
+                "total": total,
+                "phase": phase,
+            }),
+        );
+        emit_studio_job(
+            &app,
+            &job_id,
+            "api",
+            &workflow,
+            "generating",
+            &label,
+            phase,
+            Some(current),
+            Some(total),
+            phase,
+        );
+    })
+}
+
+fn handle_api_stream_request(
+    stream: &mut TcpStream,
+    app: &AppHandle,
+    req: &HttpRequest,
+    engine_state: Arc<Mutex<Option<Arc<Engine>>>>,
+    generation_queue: Arc<Mutex<()>>,
+    api_key: &str,
+    speakers: Arc<Mutex<Vec<ApiSpeakerPersona>>>,
+) -> (u16, String) {
+    if req.method != "POST" {
+        let (status, content_type, body, message) =
+            json_error(404, "not_found", "route not found");
+        write_http_response(stream, status, content_type, &body);
+        return (status, message);
+    }
+    if !api_authorized(req, api_key) {
+        let (status, content_type, body, message) =
+            json_error(401, "unauthorized", "invalid or missing local API key");
+        write_http_response(stream, status, content_type, &body);
+        return (status, message);
+    }
+    let speaker_list = api_current_speakers(&speakers);
+
+    let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+        Ok(value) => value,
+        Err(e) => {
+            let (status, content_type, body, message) =
+                json_error(400, "invalid_json", e.to_string());
+            write_http_response(stream, status, content_type, &body);
+            return (status, message);
+        }
+    };
+    let format = body
+        .get("response_format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("wav");
+    if format != "wav" {
+        let (status, content_type, body, message) = json_error(
+            501,
+            "format_not_supported",
+            "streaming API currently emits wav-base64 chunks and a final wav-base64 result",
+        );
+        write_http_response(stream, status, content_type, &body);
+        return (status, message);
+    }
+
+    let engine = match api_clone_engine(&engine_state) {
+        Ok(engine) => engine,
+        Err(e) => {
+            let (status, content_type, body, message) = json_error(409, "engine_not_loaded", e);
+            write_http_response(stream, status, content_type, &body);
+            return (status, message);
+        }
+    };
+    if !engine.supports_streaming() {
+        let (status, content_type, body, message) = json_error(
+            409,
+            "streaming_not_supported",
+            "loaded Higgs engine DLL does not expose streaming generation",
+        );
+        write_http_response(stream, status, content_type, &body);
+        return (status, message);
+    }
+
+    let writer_stream = match stream.try_clone() {
+        Ok(stream) => stream,
+        Err(e) => {
+            let (status, content_type, body, message) =
+                json_error(500, "stream_clone_failed", e.to_string());
+            write_http_response(stream, status, content_type, &body);
+            return (status, message);
+        }
+    };
+    if let Err(e) = write_streaming_response_header(stream) {
+        return (500, e);
+    }
+    let writer = Arc::new(Mutex::new(writer_stream));
+
+    let mode = body
+        .get("mode")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let voice = body
+        .get("voice")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    let text = body
+        .get("input")
+        .or_else(|| body.get("continuation_text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if text.is_empty() && mode != "continue" && mode != "continue_speech" {
+        let _ = write_ndjson_event(
+            &writer,
+            serde_json::json!({
+                "event": "error",
+                "error": {"code": "missing_input", "message": "input is required"},
+            }),
+        );
+        return (400, "input is required".into());
+    }
+
+    let job_id = next_studio_job_id("api-stream");
+    let mut options = api_generation_options(&body);
+    set_bool_option(&mut options, "emit_stream_audio_chunks", true);
+    set_bool_option(&mut options, "stream_playback", true);
+
+    let workflow: String;
+    let label: String;
+    enum StreamRequestKind {
+        Tts { text: String },
+        VoiceClone {
+            text: String,
+            ref_wav: String,
+            ref_text: Option<String>,
+        },
+        Finish {
+            audio_wav: String,
+            continuation: Option<String>,
+        },
+    }
+
+    let request_kind = if mode == "continue" || mode == "continue_speech" || body.get("audio_path").is_some() {
+        let audio_path = body
+            .get("audio_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if audio_path.is_empty() {
+            let _ = write_ndjson_event(
+                &writer,
+                serde_json::json!({
+                    "event": "error",
+                    "error": {"code": "missing_audio_path", "message": "audio_path is required"},
+                }),
+            );
+            return (400, "audio_path is required".into());
+        }
+        let audio_wav = match prepare_reference_audio(&audio_path, &options) {
+            Ok(path) => path,
+            Err(e) => {
+                let _ = write_ndjson_event(
+                    &writer,
+                    serde_json::json!({
+                        "event": "error",
+                        "error": {"code": "invalid_audio", "message": e},
+                    }),
+                );
+                return (400, "invalid audio".into());
+            }
+        };
+        workflow = "finish".into();
+        label = api_job_label(&text, "Continue speech");
+        StreamRequestKind::Finish {
+            audio_wav,
+            continuation: body
+                .get("continuation_text")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string()),
+        }
+    } else if voice != "default" || body.get("reference_audio_path").is_some() {
+        let (ref_path, ref_text, speaker_name) = if voice != "default" {
+            let speaker_key = voice.strip_prefix("speaker:").unwrap_or(voice).trim();
+            let speaker = match api_find_speaker(speaker_list.as_slice(), speaker_key) {
+                Some(speaker) => speaker,
+                None => {
+                    let message = format!("saved speaker identity not found: {}", speaker_key);
+                    let _ = write_ndjson_event(
+                        &writer,
+                        serde_json::json!({
+                            "event": "error",
+                            "error": {"code": "speaker_not_found", "message": message},
+                        }),
+                    );
+                    return (404, "saved speaker identity not found".into());
+                }
+            };
+            if speaker.normalize && options.get("normalize_reference").is_none() {
+                set_bool_option(&mut options, "normalize_reference", true);
+            }
+            set_string_option(&mut options, "reference_cache_path", &speaker.cache_path);
+            (
+                speaker.ref_path.clone(),
+                if speaker.ref_text.trim().is_empty() {
+                    None
+                } else {
+                    Some(speaker.ref_text.clone())
+                },
+                speaker.name.clone(),
+            )
+        } else {
+            (
+                body.get("reference_audio_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                body.get("reference_text")
+                    .and_then(|v| v.as_str())
+                    .map(|v| v.to_string()),
+                "Voice clone".to_string(),
+            )
+        };
+        if ref_path.trim().is_empty() {
+            let _ = write_ndjson_event(
+                &writer,
+                serde_json::json!({
+                    "event": "error",
+                    "error": {"code": "missing_reference_audio", "message": "reference_audio_path or saved speaker voice is required"},
+                }),
+            );
+            return (400, "reference audio is required".into());
+        }
+        let ref_wav = match prepare_reference_audio(&ref_path, &options) {
+            Ok(path) => path,
+            Err(e) => {
+                let _ = write_ndjson_event(
+                    &writer,
+                    serde_json::json!({
+                        "event": "error",
+                        "error": {"code": "invalid_reference_audio", "message": e},
+                    }),
+                );
+                return (400, "invalid reference audio".into());
+            }
+        };
+        workflow = "voice_clone".into();
+        label = format!("{} - {}", speaker_name, api_job_label(&text, "Voice clone"));
+        StreamRequestKind::VoiceClone {
+            text,
+            ref_wav,
+            ref_text,
+        }
+    } else {
+        workflow = "tts".into();
+        label = api_job_label(&text, "Plain TTS");
+        StreamRequestKind::Tts { text }
+    };
+
+    emit_studio_job(
+        app,
+        &job_id,
+        "api",
+        &workflow,
+        "queued",
+        &label,
+        "queued",
+        None,
+        None,
+        "Waiting for generation slot",
+    );
+    let _ = write_ndjson_event(
+        &writer,
+        serde_json::json!({
+            "event": "queued",
+            "jobId": &job_id,
+            "workflow": &workflow,
+            "label": &label,
+            "encoding": "wav-base64",
+        }),
+    );
+
+    let _queue = match generation_queue.lock() {
+        Ok(queue) => queue,
+        Err(_) => {
+            let _ = write_ndjson_event(
+                &writer,
+                serde_json::json!({
+                    "event": "error",
+                    "error": {"code": "queue_error", "message": "generation queue poisoned"},
+                }),
+            );
+            return (500, "generation queue poisoned".into());
+        }
+    };
+
+    emit_studio_job(
+        app,
+        &job_id,
+        "api",
+        &workflow,
+        "generating",
+        &label,
+        "preparing",
+        Some(0),
+        Some(1),
+        "Preparing stream",
+    );
+    let _ = write_ndjson_event(
+        &writer,
+        serde_json::json!({
+            "event": "start",
+            "jobId": &job_id,
+            "workflow": &workflow,
+            "label": &label,
+        }),
+    );
+
+    let progress = api_stream_progress_callback(app, writer.clone(), &job_id, &workflow, &label);
+    let audio_chunk = api_stream_audio_callback(writer.clone());
+    let result = match request_kind {
+        StreamRequestKind::Tts { text } => engine.generate_tts_stream(&text, &options, progress, audio_chunk),
+        StreamRequestKind::VoiceClone {
+            text,
+            ref_wav,
+            ref_text,
+        } => engine.generate_voice_clone_stream(
+            &text,
+            &ref_wav,
+            ref_text.as_deref(),
+            &options,
+            progress,
+            audio_chunk,
+        ),
+        StreamRequestKind::Finish {
+            audio_wav,
+            continuation,
+        } => engine.generate_finish_sentence_stream(
+            &audio_wav,
+            continuation.as_deref(),
+            &options,
+            progress,
+            audio_chunk,
+        ),
+    };
+
+    match result {
+        Ok(audio) => {
+            emit_studio_job(
+                app,
+                &job_id,
+                "api",
+                &workflow,
+                "complete",
+                &label,
+                "complete",
+                Some(1),
+                Some(1),
+                "Complete",
+            );
+            let _ = write_ndjson_event(
+                &writer,
+                serde_json::json!({
+                    "event": "final",
+                    "jobId": &job_id,
+                    "sampleRate": audio.sample_rate,
+                    "channels": audio.channels,
+                    "sampleCount": audio.samples.len(),
+                    "encoding": "wav-base64",
+                    "wavBase64": audio.encode_base64_wav(),
+                }),
+            );
+            let _ = write_ndjson_event(&writer, serde_json::json!({ "event": "done", "jobId": &job_id }));
+            (200, "stream complete".into())
+        }
+        Err(e) => {
+            let message = map_engine_err(&e);
+            emit_studio_job(
+                app,
+                &job_id,
+                "api",
+                &workflow,
+                if message.to_lowercase().contains("cancel") {
+                    "cancelled"
+                } else {
+                    "failed"
+                },
+                &label,
+                "failed",
+                None,
+                None,
+                &message,
+            );
+            let _ = write_ndjson_event(
+                &writer,
+                serde_json::json!({
+                    "event": "error",
+                    "jobId": &job_id,
+                    "error": {"code": "generation_failed", "message": message},
+                }),
+            );
+            (500, "generation failed".into())
+        }
+    }
+}
+
+fn handle_api_request(
+    app: &AppHandle,
+    req: &HttpRequest,
+    engine_state: Arc<Mutex<Option<Arc<Engine>>>>,
+    generation_queue: Arc<Mutex<()>>,
+    api_key: &str,
+    speakers: Arc<Mutex<Vec<ApiSpeakerPersona>>>,
+) -> (u16, &'static str, Vec<u8>, String) {
+    if req.method == "OPTIONS" {
+        return (204, "text/plain", Vec::new(), "preflight".to_string());
+    }
+
+    if req.route == "/health" {
+        return json_response(serde_json::json!({
+            "ok": true,
+            "service": "Higgs Audio v3 Studio",
+        }));
+    }
+
+    if !api_authorized(req, api_key) {
+        return json_error(401, "unauthorized", "invalid or missing local API key");
+    }
+    let speaker_list = api_current_speakers(&speakers);
+
+    match (req.method.as_str(), req.route.as_str()) {
+        ("GET", "/v1/status") => {
+            let mut status = api_engine_status(&engine_state);
+            if let Some(map) = status.as_object_mut() {
+                map.insert("speakerCount".into(), serde_json::json!(speaker_list.len()));
+            }
+            json_response(status)
+        }
+        ("GET", "/v1/models") => json_response(serde_json::json!({ "data": list_all_models() })),
+        ("GET", "/v1/higgs/speakers") => json_response(serde_json::json!({
+            "data": speaker_list.iter().map(|speaker| {
+                let has_cache = !speaker.cache_path.trim().is_empty()
+                    && PathBuf::from(&speaker.cache_path).is_file();
+                serde_json::json!({
+                    "id": speaker.id,
+                    "name": speaker.name,
+                    "voice": format!("speaker:{}", speaker.id),
+                    "hasReferenceAudio": !speaker.ref_path.trim().is_empty(),
+                    "hasTranscript": !speaker.ref_text.trim().is_empty(),
+                    "hasCache": has_cache,
+                    "normalizeReference": speaker.normalize,
+                })
+            }).collect::<Vec<_>>()
+        })),
+        ("POST", "/v1/higgs/cancel") => match api_clone_engine(&engine_state) {
+            Ok(engine) => {
+                engine.cancel();
+                json_response(serde_json::json!({ "cancelled": true }))
+            }
+            Err(e) => json_error(409, "engine_not_loaded", e),
+        },
+        ("POST", "/v1/audio/speech") => {
+            let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+                Ok(value) => value,
+                Err(e) => return json_error(400, "invalid_json", e.to_string()),
+            };
+            let text = body
+                .get("input")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if text.is_empty() {
+                return json_error(400, "missing_input", "input is required");
+            }
+            let format = body
+                .get("response_format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("wav");
+            if format != "wav" {
+                return json_error(
+                    501,
+                    "format_not_supported",
+                    "API currently returns wav; desktop save supports mp3",
+                );
+            }
+            let voice = body
+                .get("voice")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+            let engine = match api_clone_engine(&engine_state) {
+                Ok(engine) => engine,
+                Err(e) => return json_error(409, "engine_not_loaded", e),
+            };
+            if voice != "default" {
+                let speaker_key = voice.strip_prefix("speaker:").unwrap_or(voice).trim();
+                let speaker = match api_find_speaker(speaker_list.as_slice(), speaker_key) {
+                    Some(speaker) => speaker,
+                    None => {
+                        return json_error(
+                            404,
+                            "speaker_not_found",
+                            format!("saved speaker identity not found: {}", speaker_key),
+                        )
+                    }
+                };
+                if speaker.ref_path.trim().is_empty() {
+                    return json_error(
+                        409,
+                        "speaker_missing_reference",
+                        format!("saved speaker '{}' has no reference audio", speaker.name),
+                    );
+                }
+                let mut api_options = api_generation_options(&body);
+                if speaker.normalize && api_options.get("normalize_reference").is_none() {
+                    if let Some(map) = api_options.as_object_mut() {
+                        map.insert("normalize_reference".into(), serde_json::json!(true));
+                    }
+                }
+                set_string_option(&mut api_options, "reference_cache_path", &speaker.cache_path);
+                let api_options = api_stream_options(api_options);
+                let ref_wav = match prepare_reference_audio(&speaker.ref_path, &api_options) {
+                    Ok(path) => path,
+                    Err(e) => return json_error(400, "invalid_reference_audio", e.to_string()),
+                };
+                let ref_text = if speaker.ref_text.trim().is_empty() {
+                    None
+                } else {
+                    Some(speaker.ref_text.as_str())
+                };
+                let job_id = next_studio_job_id("api");
+                let label = format!("{} - {}", speaker.name, api_job_label(&text, "Voice clone"));
+                emit_studio_job(
+                    app,
+                    &job_id,
+                    "api",
+                    "voice_clone",
+                    "queued",
+                    &label,
+                    "queued",
+                    None,
+                    None,
+                    "Waiting for generation slot",
+                );
+                let _queue = match generation_queue.lock() {
+                    Ok(queue) => {
+                        emit_studio_job(
+                            app,
+                            &job_id,
+                            "api",
+                            "voice_clone",
+                            "generating",
+                            &label,
+                            "preparing",
+                            Some(0),
+                            Some(1),
+                            "Preparing voice clone",
+                        );
+                        queue
+                    }
+                    Err(_) => {
+                        emit_studio_job(
+                            app,
+                            &job_id,
+                            "api",
+                            "voice_clone",
+                            "failed",
+                            &label,
+                            "failed",
+                            None,
+                            None,
+                            "generation queue poisoned",
+                        );
+                        return json_error(500, "queue_error", "generation queue poisoned");
+                    }
+                };
+                return match api_generate_voice_clone(
+                    &engine,
+                    &text,
+                    &ref_wav,
+                    ref_text,
+                    &api_options,
+                    api_job_progress(app, &job_id, "voice_clone", &label),
+                ) {
+                    Ok(audio) => {
+                        emit_studio_job(
+                            app,
+                            &job_id,
+                            "api",
+                            "voice_clone",
+                            "complete",
+                            &label,
+                            "complete",
+                            Some(1),
+                            Some(1),
+                            "Complete",
+                        );
+                        (
+                            200,
+                            "audio/wav",
+                            audio.encode_pcm16_wav(),
+                            format!("speech generated with speaker {}", speaker.name),
+                        )
+                    }
+                    Err(e) => {
+                        let message = map_engine_err(&e);
+                        emit_studio_job(
+                            app,
+                            &job_id,
+                            "api",
+                            "voice_clone",
+                            if message.to_lowercase().contains("cancel") {
+                                "cancelled"
+                            } else {
+                                "failed"
+                            },
+                            &label,
+                            "failed",
+                            None,
+                            None,
+                            &message,
+                        );
+                        json_error(500, "generation_failed", message)
+                    }
+                };
+            }
+            let api_options = api_stream_options(api_generation_options(&body));
+            let job_id = next_studio_job_id("api");
+            let label = api_job_label(&text, "Plain TTS");
+            emit_studio_job(
+                app,
+                &job_id,
+                "api",
+                "tts",
+                "queued",
+                &label,
+                "queued",
+                None,
+                None,
+                "Waiting for generation slot",
+            );
+            let _queue = match generation_queue.lock() {
+                Ok(queue) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "tts",
+                        "generating",
+                        &label,
+                        "preparing",
+                        Some(0),
+                        Some(1),
+                        "Preparing TTS",
+                    );
+                    queue
+                }
+                Err(_) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "tts",
+                        "failed",
+                        &label,
+                        "failed",
+                        None,
+                        None,
+                        "generation queue poisoned",
+                    );
+                    return json_error(500, "queue_error", "generation queue poisoned");
+                }
+            };
+            match api_generate_tts(
+                &engine,
+                &text,
+                &api_options,
+                api_job_progress(app, &job_id, "tts", &label),
+            ) {
+                Ok(audio) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "tts",
+                        "complete",
+                        &label,
+                        "complete",
+                        Some(1),
+                        Some(1),
+                        "Complete",
+                    );
+                    (
+                        200,
+                        "audio/wav",
+                        audio.encode_pcm16_wav(),
+                        "speech generated".to_string(),
+                    )
+                }
+                Err(e) => {
+                    let message = map_engine_err(&e);
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "tts",
+                        if message.to_lowercase().contains("cancel") {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        },
+                        &label,
+                        "failed",
+                        None,
+                        None,
+                        &message,
+                    );
+                    json_error(500, "generation_failed", message)
+                }
+            }
+        }
+        ("POST", "/v1/higgs/voice-clone") => {
+            let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+                Ok(value) => value,
+                Err(e) => return json_error(400, "invalid_json", e.to_string()),
+            };
+            let text = body
+                .get("input")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let ref_path = body
+                .get("reference_audio_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if text.is_empty() || ref_path.is_empty() {
+                return json_error(
+                    400,
+                    "missing_clone_input",
+                    "input and reference_audio_path are required",
+                );
+            }
+            let format = body
+                .get("response_format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("wav");
+            if format != "wav" {
+                return json_error(
+                    501,
+                    "format_not_supported",
+                    "API currently returns wav; desktop save supports mp3",
+                );
+            }
+            let ref_text = body.get("reference_text").and_then(|v| v.as_str());
+            let api_options = api_stream_options(api_generation_options(&body));
+            let ref_wav = match prepare_reference_audio(&ref_path, &api_options) {
+                Ok(path) => path,
+                Err(e) => return json_error(400, "invalid_reference_audio", e.to_string()),
+            };
+            let engine = match api_clone_engine(&engine_state) {
+                Ok(engine) => engine,
+                Err(e) => return json_error(409, "engine_not_loaded", e),
+            };
+            let job_id = next_studio_job_id("api");
+            let label = api_job_label(&text, "Voice clone");
+            emit_studio_job(
+                app,
+                &job_id,
+                "api",
+                "voice_clone",
+                "queued",
+                &label,
+                "queued",
+                None,
+                None,
+                "Waiting for generation slot",
+            );
+            let _queue = match generation_queue.lock() {
+                Ok(queue) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "voice_clone",
+                        "generating",
+                        &label,
+                        "preparing",
+                        Some(0),
+                        Some(1),
+                        "Preparing voice clone",
+                    );
+                    queue
+                }
+                Err(_) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "voice_clone",
+                        "failed",
+                        &label,
+                        "failed",
+                        None,
+                        None,
+                        "generation queue poisoned",
+                    );
+                    return json_error(500, "queue_error", "generation queue poisoned");
+                }
+            };
+            match api_generate_voice_clone(
+                &engine,
+                &text,
+                &ref_wav,
+                ref_text,
+                &api_options,
+                api_job_progress(app, &job_id, "voice_clone", &label),
+            ) {
+                Ok(audio) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "voice_clone",
+                        "complete",
+                        &label,
+                        "complete",
+                        Some(1),
+                        Some(1),
+                        "Complete",
+                    );
+                    (
+                        200,
+                        "audio/wav",
+                        audio.encode_pcm16_wav(),
+                        "voice clone generated".to_string(),
+                    )
+                }
+                Err(e) => {
+                    let message = map_engine_err(&e);
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "voice_clone",
+                        if message.to_lowercase().contains("cancel") {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        },
+                        &label,
+                        "failed",
+                        None,
+                        None,
+                        &message,
+                    );
+                    json_error(500, "generation_failed", message)
+                }
+            }
+        }
+        ("POST", "/v1/higgs/continue-speech") => {
+            let body: serde_json::Value = match serde_json::from_slice(&req.body) {
+                Ok(value) => value,
+                Err(e) => return json_error(400, "invalid_json", e.to_string()),
+            };
+            let audio_path = body
+                .get("audio_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if audio_path.is_empty() {
+                return json_error(400, "missing_audio_path", "audio_path is required");
+            }
+            let continuation = body.get("continuation_text").and_then(|v| v.as_str());
+            let api_options = api_stream_options(api_generation_options(&body));
+            let audio_wav = match prepare_reference_audio(&audio_path, &api_options) {
+                Ok(path) => path,
+                Err(e) => return json_error(400, "invalid_audio", e.to_string()),
+            };
+            let engine = match api_clone_engine(&engine_state) {
+                Ok(engine) => engine,
+                Err(e) => return json_error(409, "engine_not_loaded", e),
+            };
+            let job_id = next_studio_job_id("api");
+            let label = api_job_label(continuation.unwrap_or(""), "Continue speech");
+            emit_studio_job(
+                app,
+                &job_id,
+                "api",
+                "finish",
+                "queued",
+                &label,
+                "queued",
+                None,
+                None,
+                "Waiting for generation slot",
+            );
+            let _queue = match generation_queue.lock() {
+                Ok(queue) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "finish",
+                        "generating",
+                        &label,
+                        "preparing",
+                        Some(0),
+                        Some(1),
+                        "Preparing continuation",
+                    );
+                    queue
+                }
+                Err(_) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "finish",
+                        "failed",
+                        &label,
+                        "failed",
+                        None,
+                        None,
+                        "generation queue poisoned",
+                    );
+                    return json_error(500, "queue_error", "generation queue poisoned");
+                }
+            };
+            match api_generate_finish_sentence(
+                &engine,
+                &audio_wav,
+                continuation,
+                &api_options,
+                api_job_progress(app, &job_id, "finish", &label),
+            ) {
+                Ok(audio) => {
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "finish",
+                        "complete",
+                        &label,
+                        "complete",
+                        Some(1),
+                        Some(1),
+                        "Complete",
+                    );
+                    (
+                        200,
+                        "audio/wav",
+                        audio.encode_pcm16_wav(),
+                        "continuation generated".to_string(),
+                    )
+                }
+                Err(e) => {
+                    let message = map_engine_err(&e);
+                    emit_studio_job(
+                        app,
+                        &job_id,
+                        "api",
+                        "finish",
+                        if message.to_lowercase().contains("cancel") {
+                            "cancelled"
+                        } else {
+                            "failed"
+                        },
+                        &label,
+                        "failed",
+                        None,
+                        None,
+                        &message,
+                    );
+                    json_error(500, "generation_failed", message)
+                }
+            }
+        }
+        ("POST", "/v1/higgs/multi-speaker") => json_error(
+            501,
+            "multi_speaker_pending",
+            "multi-speaker API route is planned after the speaker library",
+        ),
+        ("POST", "/v1/higgs/transcribe-reference") => json_error(
+            501,
+            "transcribe_api_pending",
+            "transcription API route is planned after API file upload handling",
+        ),
+        _ => json_error(404, "not_found", "route not found"),
+    }
+}
+
+fn serve_api_connection(
+    mut stream: TcpStream,
+    app: AppHandle,
+    engine_state: Arc<Mutex<Option<Arc<Engine>>>>,
+    generation_queue: Arc<Mutex<()>>,
+    api_key: String,
+    speakers: Arc<Mutex<Vec<ApiSpeakerPersona>>>,
+) {
+    let start = Instant::now();
+    let req = match read_http_request(&mut stream) {
+        Ok(req) => req,
+        Err(e) => {
+            let (status, content_type, body, message) = json_error(400, "bad_request", e);
+            write_http_response(&mut stream, status, content_type, &body);
+            emit_api_log(
+                &app,
+                "error",
+                "request",
+                "",
+                "",
+                status,
+                start.elapsed().as_millis(),
+                &message,
+            );
+            return;
+        }
+    };
+    if req.route == "/v1/higgs/audio/stream" && req.method != "OPTIONS" {
+        let (status, message) = handle_api_stream_request(
+            &mut stream,
+            &app,
+            &req,
+            engine_state,
+            generation_queue,
+            &api_key,
+            speakers,
+        );
+        emit_api_log(
+            &app,
+            if status >= 500 {
+                "error"
+            } else if status >= 400 {
+                "warn"
+            } else {
+                "info"
+            },
+            "job",
+            &req.method,
+            &req.route,
+            status,
+            start.elapsed().as_millis(),
+            &message,
+        );
+        return;
+    }
+    let (status, content_type, body, message) = handle_api_request(
+        &app,
+        &req,
+        engine_state,
+        generation_queue,
+        &api_key,
+        speakers,
+    );
+    write_http_response(&mut stream, status, content_type, &body);
+    emit_api_log(
+        &app,
+        if status >= 500 {
+            "error"
+        } else if status >= 400 {
+            "warn"
+        } else {
+            "info"
+        },
+        if req.route.contains("/higgs/") || req.route.contains("/audio/speech") {
+            "job"
+        } else {
+            "request"
+        },
+        &req.method,
+        &req.route,
+        status,
+        start.elapsed().as_millis(),
+        &message,
+    );
+}
+
+#[tauri::command]
+fn api_server_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    config: ApiServerConfig,
+) -> Result<serde_json::Value, String> {
+    if config.api_key.trim().len() < 8 {
+        return Err("API key must be at least 8 characters".into());
+    }
+    let host = if config.host.trim().is_empty() {
+        "127.0.0.1".to_string()
+    } else {
+        config.host.trim().to_string()
+    };
+    let listener = TcpListener::bind((host.as_str(), config.port)).map_err(|e| e.to_string())?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let local_addr = listener.local_addr().map_err(|e| e.to_string())?;
+    let port = local_addr.port();
+
+    let mut guard = state.api_server.lock().unwrap();
+    if guard
+        .as_ref()
+        .map(|server| !server.stop.load(Ordering::SeqCst))
+        .unwrap_or(false)
+    {
+        return Err("API server is already running".into());
+    }
+    {
+        let mut speaker_guard = state.api_speakers.lock().unwrap();
+        *speaker_guard = config.speakers.clone().unwrap_or_default();
+    }
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = stop.clone();
+    let thread_app = app.clone();
+    let thread_engine = state.engine.clone();
+    let thread_queue = state.generation_queue.clone();
+    let api_key = config.api_key.clone();
+    let speakers = state.api_speakers.clone();
+    std::thread::spawn(move || {
+        emit_api_log(
+            &thread_app,
+            "info",
+            "server",
+            "START",
+            "/api",
+            200,
+            0,
+            "API server started",
+        );
+        while !thread_stop.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    let app = thread_app.clone();
+                    let engine = thread_engine.clone();
+                    let queue = thread_queue.clone();
+                    let key = api_key.clone();
+                    let speakers = speakers.clone();
+                    std::thread::spawn(move || {
+                        serve_api_connection(stream, app, engine, queue, key, speakers)
+                    });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                Err(e) => {
+                    emit_api_log(
+                        &thread_app,
+                        "error",
+                        "server",
+                        "ACCEPT",
+                        "/api",
+                        500,
+                        0,
+                        &e.to_string(),
+                    );
+                    break;
+                }
+            }
+        }
+        emit_api_log(
+            &thread_app,
+            "info",
+            "server",
+            "STOP",
+            "/api",
+            200,
+            0,
+            "API server stopped",
+        );
+    });
+
+    *guard = Some(ApiServerHandle {
+        stop,
+        host: host.clone(),
+        port,
+        api_key: config.api_key,
+        started_at: Instant::now(),
+    });
+
+    Ok(serde_json::json!({
+        "running": true,
+        "host": host,
+        "port": port,
+        "baseUrl": format!("http://{}:{}/v1", local_addr.ip(), port),
+    }))
+}
+
+#[tauri::command]
+fn api_update_speakers(
+    state: State<'_, AppState>,
+    speakers: Vec<ApiSpeakerPersona>,
+) -> Result<serde_json::Value, String> {
+    let count = speakers.len();
+    {
+        let mut guard = state.api_speakers.lock().unwrap();
+        *guard = speakers;
+    }
+    let running = state
+        .api_server
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|server| !server.stop.load(Ordering::SeqCst))
+        .unwrap_or(false);
+    Ok(serde_json::json!({
+        "running": running,
+        "speakerCount": count,
+    }))
+}
+
+#[tauri::command]
+fn api_server_stop(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut guard = state.api_server.lock().unwrap();
+    if let Some(server) = guard.take() {
+        server.stop.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect((server.host.as_str(), server.port));
+    }
+    Ok(serde_json::json!({ "running": false }))
+}
+
+#[tauri::command]
+fn api_server_status(state: State<'_, AppState>) -> serde_json::Value {
+    let guard = state.api_server.lock().unwrap();
+    if let Some(server) = guard.as_ref() {
+        let running = !server.stop.load(Ordering::SeqCst);
+        serde_json::json!({
+            "running": running,
+            "host": server.host,
+            "port": server.port,
+            "baseUrl": format!("http://{}:{}/v1", server.host, server.port),
+            "apiKeySet": !server.api_key.is_empty(),
+            "uptimeSeconds": server.started_at.elapsed().as_secs(),
+        })
+    } else {
+        serde_json::json!({ "running": false })
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // File helpers
 // ═══════════════════════════════════════════════════════════════════════════
+
+fn safe_file_part(value: &str) -> String {
+    let safe: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe = safe.trim_matches('_');
+    if safe.is_empty() {
+        "speaker".into()
+    } else {
+        safe.chars().take(80).collect()
+    }
+}
+
+fn speaker_store_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("speakers");
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    Ok(root)
+}
+
+fn speaker_dir(app: &AppHandle, id: &str, name: &str) -> Result<PathBuf, String> {
+    let dir =
+        speaker_store_root(app)?.join(format!("{}_{}", safe_file_part(name), safe_file_part(id)));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+fn speaker_cache_file(app: &AppHandle, id: &str, name: &str) -> Result<PathBuf, String> {
+    let dir = speaker_dir(app, id, name)?.join("cache");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("speaker.hspkcache"))
+}
+
+fn add_zip_file<W: Write + Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    source: &Path,
+    archive_name: &str,
+) -> Result<(), String> {
+    if !source.exists() || !source.is_file() {
+        return Ok(());
+    }
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    zip.start_file(archive_name.replace('\\', "/"), options)
+        .map_err(|e| e.to_string())?;
+    let mut file = std::fs::File::open(source).map_err(|e| e.to_string())?;
+    std::io::copy(&mut file, zip).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn speaker_cache_path(
+    app: AppHandle,
+    speaker_id: String,
+    speaker_name: String,
+) -> Result<serde_json::Value, String> {
+    let path = speaker_cache_file(&app, &speaker_id, &speaker_name)?;
+    Ok(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "exists": path.exists(),
+    }))
+}
 
 #[tauri::command]
 fn save_binary_file(path: String, base64_data: String) -> Result<(), String> {
@@ -694,6 +2741,246 @@ fn save_audio_file(path: String, base64_wav: String) -> Result<(), String> {
 fn save_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+fn store_speaker_asset(
+    app: AppHandle,
+    speaker_id: String,
+    speaker_name: String,
+    source_path: String,
+    asset_kind: String,
+) -> Result<serde_json::Value, String> {
+    let src = PathBuf::from(&source_path);
+    if !src.exists() {
+        return Err(format!("source file not found: {}", source_path));
+    }
+    let ext = src
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("dat");
+    let stem = if asset_kind == "image" {
+        "display"
+    } else {
+        "reference"
+    };
+    let filename = format!("{}.{}", stem, ext);
+    let dir = speaker_dir(&app, &speaker_id, &speaker_name)?;
+    let dest = dir.join(&filename);
+    if let (Ok(src_canon), Ok(dest_canon)) = (src.canonicalize(), dest.canonicalize()) {
+        if src_canon == dest_canon {
+            return Ok(serde_json::json!({
+                "path": dest.to_string_lossy(),
+                "fileName": filename,
+            }));
+        }
+    }
+    std::fs::copy(&src, &dest).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "path": dest.to_string_lossy(),
+        "fileName": filename,
+    }))
+}
+
+#[tauri::command]
+fn write_speaker_metadata(
+    app: AppHandle,
+    mut speaker: SpeakerArchivePersona,
+) -> Result<serde_json::Value, String> {
+    let dir = speaker_dir(&app, &speaker.id, &speaker.name)?;
+    let cache_path = speaker_cache_file(&app, &speaker.id, &speaker.name)?;
+    if speaker.cache_path.trim().is_empty() {
+        speaker.cache_path = cache_path.to_string_lossy().into_owned();
+    }
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(&speaker).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("transcript.txt"), &speaker.ref_text).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("notes.txt"), &speaker.notes).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "dir": dir.to_string_lossy(),
+        "cachePath": cache_path.to_string_lossy(),
+        "cacheExists": cache_path.exists(),
+    }))
+}
+
+#[tauri::command]
+fn export_speaker_zip(
+    app: AppHandle,
+    path: String,
+    speakers: Vec<SpeakerArchivePersona>,
+) -> Result<(), String> {
+    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    let manifest = serde_json::json!({
+        "app": "Higgs Audio v3 Studio",
+        "format": "speaker-gallery-v1",
+        "speakers": speakers,
+    });
+    zip.start_file("manifest.json", options)
+        .map_err(|e| e.to_string())?;
+    zip.write_all(
+        serde_json::to_string_pretty(&manifest)
+            .map_err(|e| e.to_string())?
+            .as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let speakers: Vec<SpeakerArchivePersona> = serde_json::from_value(
+        manifest
+            .get("speakers")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )
+    .map_err(|e| e.to_string())?;
+
+    for speaker in speakers {
+        let dir = format!(
+            "speakers/{}_{}",
+            safe_file_part(&speaker.name),
+            safe_file_part(&speaker.id)
+        );
+        zip.start_file(format!("{}/transcript.txt", dir), options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(speaker.ref_text.as_bytes())
+            .map_err(|e| e.to_string())?;
+        zip.start_file(format!("{}/notes.txt", dir), options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(speaker.notes.as_bytes())
+            .map_err(|e| e.to_string())?;
+        if !speaker.ref_path.trim().is_empty() {
+            let src = PathBuf::from(&speaker.ref_path);
+            let name = src
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or("reference_audio");
+            add_zip_file(&mut zip, &src, &format!("{}/{}", dir, name))?;
+        }
+        if !speaker.photo_path.trim().is_empty() {
+            let src = PathBuf::from(&speaker.photo_path);
+            let name = src
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or("display_image");
+            add_zip_file(&mut zip, &src, &format!("{}/{}", dir, name))?;
+        }
+        let cache_path = if !speaker.cache_path.trim().is_empty() {
+            PathBuf::from(&speaker.cache_path)
+        } else {
+            speaker_cache_file(&app, &speaker.id, &speaker.name)?
+        };
+        add_zip_file(&mut zip, &cache_path, &format!("{}/cache/speaker.hspkcache", dir))?;
+    }
+    zip.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn import_speaker_zip(app: AppHandle, path: String) -> Result<serde_json::Value, String> {
+    let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut manifest_text = String::new();
+    archive
+        .by_name("manifest.json")
+        .map_err(|e| e.to_string())?
+        .read_to_string(&mut manifest_text)
+        .map_err(|e| e.to_string())?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
+    let mut speakers: Vec<SpeakerArchivePersona> = serde_json::from_value(
+        manifest
+            .get("speakers")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )
+    .map_err(|e| e.to_string())?;
+
+    for speaker in speakers.iter_mut() {
+        let dir_name = format!(
+            "{}_{}",
+            safe_file_part(&speaker.name),
+            safe_file_part(&speaker.id)
+        );
+        let archive_dir = format!("speakers/{}", dir_name);
+        let local_dir = speaker_dir(&app, &speaker.id, &speaker.name)?;
+        speaker.ref_path.clear();
+        speaker.photo_path.clear();
+        speaker.cache_path.clear();
+
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let name = file.name().replace('\\', "/");
+            if !name.starts_with(&format!("{}/", archive_dir)) || name.ends_with('/') {
+                continue;
+            }
+            let rel = name
+                .strip_prefix(&format!("{}/", archive_dir))
+                .unwrap_or("")
+                .trim_start_matches('/');
+            let rel_path = Path::new(rel);
+            if rel.is_empty()
+                || rel_path.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::ParentDir
+                            | std::path::Component::RootDir
+                            | std::path::Component::Prefix(_)
+                    )
+                })
+            {
+                continue;
+            }
+            let leaf = Path::new(&name)
+                .file_name()
+                .and_then(|v| v.to_str())
+                .unwrap_or("asset")
+                .to_string();
+            if leaf == "transcript.txt" || leaf == "notes.txt" {
+                continue;
+            }
+            let out = local_dir.join(rel_path);
+            if let Some(parent) = out.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let mut outfile = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+            std::io::copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
+            let leaf_lc = leaf.to_lowercase();
+            if rel.starts_with("cache/") {
+                if leaf_lc == "speaker.hspkcache" {
+                    speaker.cache_path = out.to_string_lossy().into_owned();
+                }
+            } else if leaf_lc.starts_with("reference") || speaker.ref_path.is_empty() {
+                speaker.ref_path = out.to_string_lossy().into_owned();
+                speaker.ref_name = leaf.clone();
+            } else if leaf_lc.starts_with("display") || speaker.photo_path.is_empty() {
+                speaker.photo_path = out.to_string_lossy().into_owned();
+            }
+        }
+        if speaker.cache_path.trim().is_empty() {
+            speaker.cache_path = speaker_cache_file(&app, &speaker.id, &speaker.name)?
+                .to_string_lossy()
+                .into_owned();
+        }
+    }
+
+    Ok(serde_json::json!({ "speakers": speakers }))
+}
+
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn audio_waveform(audio_path: String, points: Option<usize>) -> Result<serde_json::Value, String> {
+    let peaks =
+        audio::waveform_peaks(&audio_path, points.unwrap_or(1200)).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "peaks": peaks }))
 }
 
 #[tauri::command]
@@ -906,6 +3193,46 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     Ok(out)
 }
 
+#[tauri::command]
+fn set_minimize_to_tray(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.minimize_to_tray.store(enabled, Ordering::SeqCst);
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_app(app: AppHandle) -> Result<(), String> {
+    app.exit(0);
+    Ok(())
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn cancel_active_generation(app: &AppHandle) {
+    let engine = app
+        .state::<AppState>()
+        .engine
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().cloned());
+    if let Some(engine) = engine {
+        engine.cancel();
+        let _ = app.emit(
+            "generation-progress",
+            serde_json::json!({
+                "current": 0,
+                "total": 1,
+                "phase": "cancelling",
+            }),
+        );
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Entry point
 // ═══════════════════════════════════════════════════════════════════════════
@@ -916,13 +3243,61 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             configure_higgs_asset_env(app);
+            let open_item = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
+            let cancel_item = MenuItem::with_id(
+                app,
+                "cancel_generation",
+                "Cancel Generation",
+                true,
+                None::<&str>,
+            )?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&open_item, &cancel_item, &quit_item])?;
+            let mut tray_builder = TrayIconBuilder::new()
+                .tooltip("Higgs Audio v3 Studio")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "open" => show_main_window(app),
+                    "cancel_generation" => cancel_active_generation(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        show_main_window(tray.app_handle());
+                    }
+                });
+            if let Some(icon) = app.default_window_icon() {
+                tray_builder = tray_builder.icon(icon.clone());
+            }
+            tray_builder.build(app)?;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<AppState>();
+                if window.label() == "main" && state.minimize_to_tray.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .manage(AppState {
-            engine: Mutex::new(None),
+            engine: Arc::new(Mutex::new(None)),
             engine_dir: Mutex::new(engine_dir),
             nvml: Mutex::new(None),
             sys: Mutex::new(System::new()),
+            download_control: Arc::new(download::DownloadControl::default()),
+            api_server: Mutex::new(None),
+            api_speakers: Arc::new(Mutex::new(Vec::new())),
+            generation_queue: Arc::new(Mutex::new(())),
+            minimize_to_tray: Arc::new(AtomicBool::new(false)),
         })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -941,12 +3316,26 @@ pub fn run() {
             transcribe_audio,
             list_models,
             download_model,
+            download_control,
+            api_server_start,
+            api_update_speakers,
+            api_server_stop,
+            api_server_status,
             save_binary_file,
             save_audio_file,
             save_text_file,
+            read_text_file,
+            store_speaker_asset,
+            speaker_cache_path,
+            write_speaker_metadata,
+            export_speaker_zip,
+            import_speaker_zip,
+            audio_waveform,
             read_audio_as_wav,
             open_external_url,
             hardware_snapshot,
+            set_minimize_to_tray,
+            quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Higgs Audio v3 Studio");

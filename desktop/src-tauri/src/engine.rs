@@ -7,6 +7,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 pub type ProgressCallback = Arc<dyn Fn(i32, i32, &str) + Send + Sync + 'static>;
+pub type AudioChunkCallback = Arc<dyn Fn(i32, i32, i64, &[f32], bool) + Send + Sync + 'static>;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,8 +62,7 @@ impl AudioResult {
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
@@ -130,7 +130,13 @@ pub enum EngineError {
 type CreateFn = unsafe extern "C" fn() -> *mut c_void;
 type DestroyFn = unsafe extern "C" fn(*mut c_void);
 type LoadModelFn = unsafe extern "C" fn(
-    *mut c_void, *const c_char, c_int, c_int, c_int, *const c_char, *const c_char,
+    *mut c_void,
+    *const c_char,
+    c_int,
+    c_int,
+    c_int,
+    *const c_char,
+    *const c_char,
 ) -> c_int;
 type UnloadModelFn = unsafe extern "C" fn(*mut c_void);
 type IsLoadedFn = unsafe extern "C" fn(*const c_void) -> bool;
@@ -138,21 +144,72 @@ type IsGeneratingFn = unsafe extern "C" fn(*const c_void) -> bool;
 type CancelFn = unsafe extern "C" fn(*mut c_void);
 type GetModelInfoFn = unsafe extern "C" fn(*const c_void, *mut ModelInfoRaw) -> c_int;
 type GenerateTtsFn = unsafe extern "C" fn(
-    *mut c_void, *const c_char, *const c_char, ProgressCallbackC, *mut c_void, *mut AudioResultRaw,
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    ProgressCallbackC,
+    *mut c_void,
+    *mut AudioResultRaw,
 ) -> c_int;
 type GenerateVoiceCloneFn = unsafe extern "C" fn(
-    *mut c_void, *const c_char, *const c_char, *const c_char, *const c_char,
-    ProgressCallbackC, *mut c_void, *mut AudioResultRaw,
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    ProgressCallbackC,
+    *mut c_void,
+    *mut AudioResultRaw,
 ) -> c_int;
 type GenerateFinishFn = unsafe extern "C" fn(
-    *mut c_void, *const c_char, *const c_char, *const c_char,
-    ProgressCallbackC, *mut c_void, *mut AudioResultRaw,
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    ProgressCallbackC,
+    *mut c_void,
+    *mut AudioResultRaw,
+) -> c_int;
+type GenerateTtsStreamFn = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    ProgressCallbackC,
+    AudioChunkCallbackC,
+    *mut c_void,
+    *mut AudioResultRaw,
+) -> c_int;
+type GenerateVoiceCloneStreamFn = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    ProgressCallbackC,
+    AudioChunkCallbackC,
+    *mut c_void,
+    *mut AudioResultRaw,
+) -> c_int;
+type GenerateFinishStreamFn = unsafe extern "C" fn(
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    ProgressCallbackC,
+    AudioChunkCallbackC,
+    *mut c_void,
+    *mut AudioResultRaw,
 ) -> c_int;
 type FreeResultFn = unsafe extern "C" fn(*mut AudioResultRaw);
 type LastErrorFn = unsafe extern "C" fn(*const c_void) -> *const c_char;
 type VersionFn = unsafe extern "C" fn() -> *const c_char;
 type TranscribeFn = unsafe extern "C" fn(
-    *mut c_void, *const c_char, *const c_char, *const c_char, *mut c_char, usize,
+    *mut c_void,
+    *const c_char,
+    *const c_char,
+    *const c_char,
+    *mut c_char,
+    usize,
 ) -> c_int;
 
 #[repr(C)]
@@ -175,6 +232,13 @@ struct AudioResultRaw {
 }
 
 type ProgressCallbackC = unsafe extern "C" fn(c_int, c_int, *const c_char, *mut c_void);
+type AudioChunkCallbackC =
+    unsafe extern "C" fn(c_int, c_int, i64, *const c_float, usize, bool, *mut c_void);
+
+struct StreamCallbacks {
+    progress: ProgressCallback,
+    audio: AudioChunkCallback,
+}
 
 pub struct Engine {
     _lib: Library,
@@ -189,6 +253,9 @@ pub struct Engine {
     generate_tts: GenerateTtsFn,
     generate_voice_clone: GenerateVoiceCloneFn,
     generate_finish: GenerateFinishFn,
+    generate_tts_stream: Option<GenerateTtsStreamFn>,
+    generate_voice_clone_stream: Option<GenerateVoiceCloneStreamFn>,
+    generate_finish_stream: Option<GenerateFinishStreamFn>,
     free_result: FreeResultFn,
     last_error: LastErrorFn,
     version: VersionFn,
@@ -202,11 +269,7 @@ impl Engine {
     pub fn load(library_path: &Path) -> Result<Self, EngineError> {
         let lib = unsafe {
             Library::new(library_path).map_err(|e| {
-                EngineError::LibraryLoad(format!(
-                    "{}: {}",
-                    library_path.display(),
-                    e
-                ))
+                EngineError::LibraryLoad(format!("{}: {}", library_path.display(), e))
             })?
         };
 
@@ -214,52 +277,71 @@ impl Engine {
             let create: Symbol<CreateFn> = lib
                 .get(b"audiocpp_create")
                 .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_create: {e}")))?;
-            let destroy: Symbol<DestroyFn> = lib.get(b"audiocpp_destroy").map_err(|e| {
-                EngineError::LibraryLoad(format!("symbol audiocpp_destroy: {e}"))
+            let destroy: Symbol<DestroyFn> = lib
+                .get(b"audiocpp_destroy")
+                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_destroy: {e}")))?;
+            let load_model: Symbol<LoadModelFn> = lib.get(b"audiocpp_load_model").map_err(|e| {
+                EngineError::LibraryLoad(format!("symbol audiocpp_load_model: {e}"))
             })?;
-            let load_model: Symbol<LoadModelFn> = lib
-                .get(b"audiocpp_load_model")
-                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_load_model: {e}")))?;
-            let unload_model: Symbol<UnloadModelFn> = lib.get(b"audiocpp_unload_model").map_err(|e| {
-                EngineError::LibraryLoad(format!("symbol audiocpp_unload_model: {e}"))
-            })?;
-            let is_loaded: Symbol<IsLoadedFn> = lib.get(b"audiocpp_is_model_loaded").map_err(|e| {
-                EngineError::LibraryLoad(format!("symbol audiocpp_is_model_loaded: {e}"))
-            })?;
-            let is_generating: Symbol<IsGeneratingFn> = lib.get(b"audiocpp_is_generating").map_err(|e| {
-                EngineError::LibraryLoad(format!("symbol audiocpp_is_generating: {e}"))
-            })?;
+            let unload_model: Symbol<UnloadModelFn> =
+                lib.get(b"audiocpp_unload_model").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_unload_model: {e}"))
+                })?;
+            let is_loaded: Symbol<IsLoadedFn> =
+                lib.get(b"audiocpp_is_model_loaded").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_is_model_loaded: {e}"))
+                })?;
+            let is_generating: Symbol<IsGeneratingFn> =
+                lib.get(b"audiocpp_is_generating").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_is_generating: {e}"))
+                })?;
             let cancel: Symbol<CancelFn> = lib
                 .get(b"audiocpp_cancel")
                 .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_cancel: {e}")))?;
-            let get_model_info: Symbol<GetModelInfoFn> = lib
-                .get(b"audiocpp_get_model_info")
-                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_get_model_info: {e}")))?;
-            let generate_tts: Symbol<GenerateTtsFn> = lib
-                .get(b"audiocpp_generate_tts")
-                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_generate_tts: {e}")))?;
-            let generate_voice_clone: Symbol<GenerateVoiceCloneFn> = lib
-                .get(b"audiocpp_generate_voice_clone")
-                .map_err(|e| {
+            let get_model_info: Symbol<GetModelInfoFn> =
+                lib.get(b"audiocpp_get_model_info").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_get_model_info: {e}"))
+                })?;
+            let generate_tts: Symbol<GenerateTtsFn> =
+                lib.get(b"audiocpp_generate_tts").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_generate_tts: {e}"))
+                })?;
+            let generate_voice_clone: Symbol<GenerateVoiceCloneFn> =
+                lib.get(b"audiocpp_generate_voice_clone").map_err(|e| {
                     EngineError::LibraryLoad(format!("symbol audiocpp_generate_voice_clone: {e}"))
                 })?;
-            let generate_finish: Symbol<GenerateFinishFn> = lib
-                .get(b"audiocpp_generate_finish_sentence")
-                .map_err(|e| {
-                    EngineError::LibraryLoad(format!("symbol audiocpp_generate_finish_sentence: {e}"))
+            let generate_finish: Symbol<GenerateFinishFn> =
+                lib.get(b"audiocpp_generate_finish_sentence").map_err(|e| {
+                    EngineError::LibraryLoad(format!(
+                        "symbol audiocpp_generate_finish_sentence: {e}"
+                    ))
                 })?;
-            let free_result: Symbol<FreeResultFn> = lib
-                .get(b"audiocpp_free_result")
-                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_free_result: {e}")))?;
-            let last_error: Symbol<LastErrorFn> = lib
-                .get(b"audiocpp_last_error")
-                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_last_error: {e}")))?;
+            let generate_tts_stream_ptr = lib
+                .get::<GenerateTtsStreamFn>(b"audiocpp_generate_tts_stream")
+                .ok()
+                .map(|symbol| *symbol);
+            let generate_voice_clone_stream_ptr = lib
+                .get::<GenerateVoiceCloneStreamFn>(b"audiocpp_generate_voice_clone_stream")
+                .ok()
+                .map(|symbol| *symbol);
+            let generate_finish_stream_ptr = lib
+                .get::<GenerateFinishStreamFn>(b"audiocpp_generate_finish_sentence_stream")
+                .ok()
+                .map(|symbol| *symbol);
+            let free_result: Symbol<FreeResultFn> =
+                lib.get(b"audiocpp_free_result").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_free_result: {e}"))
+                })?;
+            let last_error: Symbol<LastErrorFn> = lib.get(b"audiocpp_last_error").map_err(|e| {
+                EngineError::LibraryLoad(format!("symbol audiocpp_last_error: {e}"))
+            })?;
             let version: Symbol<VersionFn> = lib
                 .get(b"audiocpp_version")
                 .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_version: {e}")))?;
-            let transcribe: Symbol<TranscribeFn> = lib
-                .get(b"audiocpp_transcribe")
-                .map_err(|e| EngineError::LibraryLoad(format!("symbol audiocpp_transcribe: {e}")))?;
+            let transcribe: Symbol<TranscribeFn> =
+                lib.get(b"audiocpp_transcribe").map_err(|e| {
+                    EngineError::LibraryLoad(format!("symbol audiocpp_transcribe: {e}"))
+                })?;
 
             // Extract raw function pointers — must do this before moving `lib`
             // into the struct, because Symbol borrows lib.
@@ -281,7 +363,9 @@ impl Engine {
 
             let handle = create_ptr();
             if handle.is_null() {
-                return Err(EngineError::LibraryLoad("audiocpp_create returned null".into()));
+                return Err(EngineError::LibraryLoad(
+                    "audiocpp_create returned null".into(),
+                ));
             }
 
             Ok(Engine {
@@ -297,6 +381,9 @@ impl Engine {
                 generate_tts: generate_tts_ptr,
                 generate_voice_clone: generate_voice_clone_ptr,
                 generate_finish: generate_finish_ptr,
+                generate_tts_stream: generate_tts_stream_ptr,
+                generate_voice_clone_stream: generate_voice_clone_stream_ptr,
+                generate_finish_stream: generate_finish_stream_ptr,
                 free_result: free_result_ptr,
                 last_error: last_error_ptr,
                 version: version_ptr,
@@ -308,7 +395,9 @@ impl Engine {
     pub fn version(&self) -> String {
         unsafe {
             let v = (self.version)();
-            if v.is_null() { "unknown".into() } else {
+            if v.is_null() {
+                "unknown".into()
+            } else {
                 CStr::from_ptr(v).to_string_lossy().into_owned()
             }
         }
@@ -320,6 +409,12 @@ impl Engine {
 
     pub fn is_generating(&self) -> bool {
         unsafe { (self.is_generating)(self.handle) }
+    }
+
+    pub fn supports_streaming(&self) -> bool {
+        self.generate_tts_stream.is_some()
+            && self.generate_voice_clone_stream.is_some()
+            && self.generate_finish_stream.is_some()
     }
 
     pub fn cancel(&self) {
@@ -339,16 +434,16 @@ impl Engine {
         };
 
         let weight_type = req.weight_type.as_deref().unwrap_or("");
-        let weight_c = CString::new(weight_type)
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let weight_c =
+            CString::new(weight_type).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
 
         let session_json = req
             .session_options
             .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_default())
             .unwrap_or_default();
-        let session_c = CString::new(session_json)
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let session_c =
+            CString::new(session_json).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
 
         let status = unsafe {
             (self.load_model)(
@@ -403,7 +498,8 @@ impl Engine {
         }
     }
 
-    pub fn get_last_error(&self) -> String {        unsafe {
+    pub fn get_last_error(&self) -> String {
+        unsafe {
             let ptr = (self.last_error)(self.handle);
             if ptr.is_null() {
                 String::new()
@@ -422,10 +518,9 @@ impl Engine {
     ) -> Result<i32, EngineError> {
         let model_c = CString::new(whisper_model_path)
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let wav_c = CString::new(wav_path)
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let lang_c = CString::new(language)
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let wav_c = CString::new(wav_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let lang_c =
+            CString::new(language).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
 
         let status = unsafe {
             (self.transcribe)(
@@ -454,7 +549,11 @@ impl Engine {
 
     // ─── private: run a generate call and extract result ──────────────────
 
-    fn extract_result(&self, status: c_int, mut raw: AudioResultRaw) -> Result<AudioResult, EngineError> {
+    fn extract_result(
+        &self,
+        status: c_int,
+        mut raw: AudioResultRaw,
+    ) -> Result<AudioResult, EngineError> {
         // Read error string (heap-allocated by C) before we free the struct.
         let error_msg = if raw.error.is_null() {
             None
@@ -464,9 +563,8 @@ impl Engine {
 
         // Read samples (heap-allocated by C) by copying into a Rust Vec.
         let result = if status == 0 && !raw.samples.is_null() && raw.sample_count > 0 {
-            let samples = unsafe {
-                std::slice::from_raw_parts(raw.samples, raw.sample_count).to_vec()
-            };
+            let samples =
+                unsafe { std::slice::from_raw_parts(raw.samples, raw.sample_count).to_vec() };
             AudioResult {
                 sample_rate: raw.sample_rate,
                 channels: raw.channels,
@@ -477,8 +575,7 @@ impl Engine {
             return Err(match status {
                 5 => EngineError::Cancelled,
                 _ => EngineError::Generation(
-                    error_msg
-                        .unwrap_or_else(|| format!("generation failed (code {status})")),
+                    error_msg.unwrap_or_else(|| format!("generation failed (code {status})")),
                 ),
             });
         };
@@ -509,6 +606,41 @@ impl Engine {
         cb(current, total, phase_str);
     }
 
+    extern "C" fn stream_progress_trampoline(
+        current: c_int,
+        total: c_int,
+        phase: *const c_char,
+        user: *mut c_void,
+    ) {
+        if user.is_null() {
+            return;
+        }
+        let cb = unsafe { &*(user as *const StreamCallbacks) };
+        let phase_str = if phase.is_null() {
+            ""
+        } else {
+            &unsafe { CStr::from_ptr(phase).to_string_lossy() }
+        };
+        (cb.progress)(current, total, phase_str);
+    }
+
+    extern "C" fn audio_chunk_trampoline(
+        sample_rate: c_int,
+        channels: c_int,
+        start_sample: i64,
+        samples: *const c_float,
+        sample_count: usize,
+        is_final: bool,
+        user: *mut c_void,
+    ) {
+        if user.is_null() || samples.is_null() || sample_count == 0 {
+            return;
+        }
+        let cb = unsafe { &*(user as *const StreamCallbacks) };
+        let slice = unsafe { std::slice::from_raw_parts(samples, sample_count) };
+        (cb.audio)(sample_rate, channels, start_sample, slice, is_final);
+    }
+
     fn make_progress_box(progress: ProgressCallback) -> *mut c_void {
         Box::into_raw(Box::new(progress)) as *mut c_void
     }
@@ -516,6 +648,16 @@ impl Engine {
     unsafe fn reclaim_progress_box(ptr: *mut c_void) {
         if !ptr.is_null() {
             drop(Box::from_raw(ptr as *mut ProgressCallback));
+        }
+    }
+
+    fn make_stream_box(progress: ProgressCallback, audio: AudioChunkCallback) -> *mut c_void {
+        Box::into_raw(Box::new(StreamCallbacks { progress, audio })) as *mut c_void
+    }
+
+    unsafe fn reclaim_stream_box(ptr: *mut c_void) {
+        if !ptr.is_null() {
+            drop(Box::from_raw(ptr as *mut StreamCallbacks));
         }
     }
 
@@ -533,17 +675,64 @@ impl Engine {
 
         let cb_ptr = Self::make_progress_box(progress);
         let mut raw = AudioResultRaw {
-            sample_rate: 0, channels: 0, sample_count: 0,
-            samples: std::ptr::null_mut(), error: std::ptr::null_mut(),
+            sample_rate: 0,
+            channels: 0,
+            sample_count: 0,
+            samples: std::ptr::null_mut(),
+            error: std::ptr::null_mut(),
         };
 
         let status = unsafe {
             (self.generate_tts)(
-                self.handle, text_c.as_ptr(), opts_c.as_ptr(),
-                Self::progress_trampoline, cb_ptr, &mut raw,
+                self.handle,
+                text_c.as_ptr(),
+                opts_c.as_ptr(),
+                Self::progress_trampoline,
+                cb_ptr,
+                &mut raw,
             )
         };
         unsafe { Self::reclaim_progress_box(cb_ptr) };
+        self.extract_result(status, raw)
+    }
+
+    pub fn generate_tts_stream(
+        &self,
+        text: &str,
+        options: &serde_json::Value,
+        progress: ProgressCallback,
+        audio: AudioChunkCallback,
+    ) -> Result<AudioResult, EngineError> {
+        let Some(generate_stream) = self.generate_tts_stream else {
+            return Err(EngineError::Generation(
+                "streaming is not supported by this engine DLL".into(),
+            ));
+        };
+        let text_c = CString::new(text).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
+            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+
+        let cb_ptr = Self::make_stream_box(progress, audio);
+        let mut raw = AudioResultRaw {
+            sample_rate: 0,
+            channels: 0,
+            sample_count: 0,
+            samples: std::ptr::null_mut(),
+            error: std::ptr::null_mut(),
+        };
+
+        let status = unsafe {
+            generate_stream(
+                self.handle,
+                text_c.as_ptr(),
+                opts_c.as_ptr(),
+                Self::stream_progress_trampoline,
+                Self::audio_chunk_trampoline,
+                cb_ptr,
+                &mut raw,
+            )
+        };
+        unsafe { Self::reclaim_stream_box(cb_ptr) };
         self.extract_result(status, raw)
     }
 
@@ -558,8 +747,8 @@ impl Engine {
         progress: ProgressCallback,
     ) -> Result<AudioResult, EngineError> {
         let text_c = CString::new(text).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let ref_path_c = CString::new(ref_audio_path)
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let ref_path_c =
+            CString::new(ref_audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let ref_text_c = CString::new(ref_text.unwrap_or(""))
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
@@ -567,17 +756,74 @@ impl Engine {
 
         let cb_ptr = Self::make_progress_box(progress);
         let mut raw = AudioResultRaw {
-            sample_rate: 0, channels: 0, sample_count: 0,
-            samples: std::ptr::null_mut(), error: std::ptr::null_mut(),
+            sample_rate: 0,
+            channels: 0,
+            sample_count: 0,
+            samples: std::ptr::null_mut(),
+            error: std::ptr::null_mut(),
         };
 
         let status = unsafe {
             (self.generate_voice_clone)(
-                self.handle, text_c.as_ptr(), ref_path_c.as_ptr(), ref_text_c.as_ptr(),
-                opts_c.as_ptr(), Self::progress_trampoline, cb_ptr, &mut raw,
+                self.handle,
+                text_c.as_ptr(),
+                ref_path_c.as_ptr(),
+                ref_text_c.as_ptr(),
+                opts_c.as_ptr(),
+                Self::progress_trampoline,
+                cb_ptr,
+                &mut raw,
             )
         };
         unsafe { Self::reclaim_progress_box(cb_ptr) };
+        self.extract_result(status, raw)
+    }
+
+    pub fn generate_voice_clone_stream(
+        &self,
+        text: &str,
+        ref_audio_path: &str,
+        ref_text: Option<&str>,
+        options: &serde_json::Value,
+        progress: ProgressCallback,
+        audio: AudioChunkCallback,
+    ) -> Result<AudioResult, EngineError> {
+        let Some(generate_stream) = self.generate_voice_clone_stream else {
+            return Err(EngineError::Generation(
+                "streaming is not supported by this engine DLL".into(),
+            ));
+        };
+        let text_c = CString::new(text).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let ref_path_c =
+            CString::new(ref_audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let ref_text_c = CString::new(ref_text.unwrap_or(""))
+            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
+            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+
+        let cb_ptr = Self::make_stream_box(progress, audio);
+        let mut raw = AudioResultRaw {
+            sample_rate: 0,
+            channels: 0,
+            sample_count: 0,
+            samples: std::ptr::null_mut(),
+            error: std::ptr::null_mut(),
+        };
+
+        let status = unsafe {
+            generate_stream(
+                self.handle,
+                text_c.as_ptr(),
+                ref_path_c.as_ptr(),
+                ref_text_c.as_ptr(),
+                opts_c.as_ptr(),
+                Self::stream_progress_trampoline,
+                Self::audio_chunk_trampoline,
+                cb_ptr,
+                &mut raw,
+            )
+        };
+        unsafe { Self::reclaim_stream_box(cb_ptr) };
         self.extract_result(status, raw)
     }
 
@@ -590,8 +836,8 @@ impl Engine {
         options: &serde_json::Value,
         progress: ProgressCallback,
     ) -> Result<AudioResult, EngineError> {
-        let audio_c = CString::new(audio_path)
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let audio_c =
+            CString::new(audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let text_c = CString::new(continuation_text.unwrap_or(""))
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
@@ -599,17 +845,70 @@ impl Engine {
 
         let cb_ptr = Self::make_progress_box(progress);
         let mut raw = AudioResultRaw {
-            sample_rate: 0, channels: 0, sample_count: 0,
-            samples: std::ptr::null_mut(), error: std::ptr::null_mut(),
+            sample_rate: 0,
+            channels: 0,
+            sample_count: 0,
+            samples: std::ptr::null_mut(),
+            error: std::ptr::null_mut(),
         };
 
         let status = unsafe {
             (self.generate_finish)(
-                self.handle, audio_c.as_ptr(), text_c.as_ptr(), opts_c.as_ptr(),
-                Self::progress_trampoline, cb_ptr, &mut raw,
+                self.handle,
+                audio_c.as_ptr(),
+                text_c.as_ptr(),
+                opts_c.as_ptr(),
+                Self::progress_trampoline,
+                cb_ptr,
+                &mut raw,
             )
         };
         unsafe { Self::reclaim_progress_box(cb_ptr) };
+        self.extract_result(status, raw)
+    }
+
+    pub fn generate_finish_sentence_stream(
+        &self,
+        audio_path: &str,
+        continuation_text: Option<&str>,
+        options: &serde_json::Value,
+        progress: ProgressCallback,
+        audio: AudioChunkCallback,
+    ) -> Result<AudioResult, EngineError> {
+        let Some(generate_stream) = self.generate_finish_stream else {
+            return Err(EngineError::Generation(
+                "streaming is not supported by this engine DLL".into(),
+            ));
+        };
+        let audio_c =
+            CString::new(audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let text_c = CString::new(continuation_text.unwrap_or(""))
+            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
+            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+
+        let cb_ptr = Self::make_stream_box(progress, audio);
+        let mut raw = AudioResultRaw {
+            sample_rate: 0,
+            channels: 0,
+            sample_count: 0,
+            samples: std::ptr::null_mut(),
+            error: std::ptr::null_mut(),
+        };
+
+        let status = unsafe {
+            generate_stream(
+                self.handle,
+                audio_c.as_ptr(),
+                text_c.as_ptr(),
+                opts_c.as_ptr(),
+                Self::stream_progress_trampoline,
+                Self::audio_chunk_trampoline,
+                cb_ptr,
+                &mut raw,
+            )
+        };
+        unsafe { Self::reclaim_stream_box(cb_ptr) };
         self.extract_result(status, raw)
     }
 }

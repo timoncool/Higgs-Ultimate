@@ -243,6 +243,9 @@ if (ENGINE_ENABLE_CUDA)
     target_link_libraries(engine_runtime PRIVATE CUDA::cudart CUDA::cufft)
 endif()
 
+add_executable(quantize_safetensors tools/quantize_safetensors.cpp)
+target_link_libraries(quantize_safetensors PRIVATE engine_runtime)
+
 if (ENGINE_BUILD_DESKTOP_API)
     add_subdirectory(app/desktop_api)
 endif()

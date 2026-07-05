@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use thiserror::Error;
@@ -22,6 +22,7 @@ pub struct DownloadProgress {
     pub total: u64,
     pub speed_mbps: f64,
     pub percent: f64,
+    pub status: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,6 +40,67 @@ pub enum DownloadError {
     Io(String),
     #[error("invalid URL: {0}")]
     InvalidUrl(String),
+    #[error("download already running")]
+    Busy,
+    #[error("download cancelled")]
+    Cancelled,
+}
+
+#[derive(Debug, Default)]
+pub struct DownloadControl {
+    active: AtomicBool,
+    paused: AtomicBool,
+    cancelled: AtomicBool,
+}
+
+impl DownloadControl {
+    pub fn begin(&self) -> bool {
+        if self
+            .active
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return false;
+        }
+        self.paused.store(false, Ordering::SeqCst);
+        self.cancelled.store(false, Ordering::SeqCst);
+        true
+    }
+
+    pub fn finish(&self) {
+        self.active.store(false, Ordering::SeqCst);
+        self.paused.store(false, Ordering::SeqCst);
+        self.cancelled.store(false, Ordering::SeqCst);
+    }
+
+    pub fn pause(&self) {
+        if self.active.load(Ordering::SeqCst) {
+            self.paused.store(true, Ordering::SeqCst);
+        }
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+    }
+
+    pub fn cancel(&self) {
+        if self.active.load(Ordering::SeqCst) {
+            self.cancelled.store(true, Ordering::SeqCst);
+            self.paused.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
 }
 
 pub fn download_file(
@@ -46,13 +108,61 @@ pub fn download_file(
     dest_dir: &Path,
     filename: Option<&str>,
     app: &AppHandle,
+    control: Arc<DownloadControl>,
+) -> Result<DownloadResult, DownloadError> {
+    if !control.begin() {
+        return Err(DownloadError::Busy);
+    }
+    let result = download_file_inner(url, dest_dir, filename, app, &control);
+    control.finish();
+    result
+}
+
+fn emit_download_progress(
+    app: &AppHandle,
+    downloaded: u64,
+    total: u64,
+    start_time: std::time::Instant,
+    status: &str,
+) {
+    let elapsed_secs = start_time.elapsed().as_secs_f64();
+    let speed_mbps = if elapsed_secs > 0.0 && status == "running" {
+        (downloaded as f64 / 1_000_000.0) / elapsed_secs
+    } else {
+        0.0
+    };
+    let percent = if total > 0 {
+        (downloaded as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    let _ = app.emit(
+        "download-progress",
+        DownloadProgress {
+            downloaded,
+            total,
+            speed_mbps,
+            percent,
+            status: status.to_string(),
+        },
+    );
+}
+
+fn download_file_inner(
+    url: &str,
+    dest_dir: &Path,
+    filename: Option<&str>,
+    app: &AppHandle,
+    control: &DownloadControl,
 ) -> Result<DownloadResult, DownloadError> {
     if url.is_empty() || !url.starts_with("http") {
         return Err(DownloadError::InvalidUrl("URL must start with http".into()));
     }
 
     let filename = filename.map(|s| s.to_string()).unwrap_or_else(|| {
-        url.rsplit('/').next().filter(|s| !s.is_empty())
+        url.rsplit('/')
+            .next()
+            .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "model.bin".to_string())
     });
@@ -83,6 +193,27 @@ pub fn download_file(
     let mut last_emit = std::time::Instant::now();
 
     loop {
+        if control.is_cancelled() {
+            drop(writer);
+            let _ = std::fs::remove_file(&tmp_path);
+            emit_download_progress(app, local_written, total, start_time, "cancelled");
+            return Err(DownloadError::Cancelled);
+        }
+
+        while control.is_paused() {
+            if control.is_cancelled() {
+                drop(writer);
+                let _ = std::fs::remove_file(&tmp_path);
+                emit_download_progress(app, local_written, total, start_time, "cancelled");
+                return Err(DownloadError::Cancelled);
+            }
+            if last_emit.elapsed().as_millis() > 500 {
+                last_emit = std::time::Instant::now();
+                emit_download_progress(app, local_written, total, start_time, "paused");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         let n = reader
             .read(&mut buf)
             .map_err(|e| DownloadError::Io(e.to_string()))?;
@@ -97,26 +228,7 @@ pub fn download_file(
 
         if last_emit.elapsed().as_millis() > 200 {
             last_emit = std::time::Instant::now();
-            let elapsed_secs = start_time.elapsed().as_secs_f64();
-            let speed_mbps = if elapsed_secs > 0.0 {
-                (local_written as f64 / 1_000_000.0) / elapsed_secs
-            } else {
-                0.0
-            };
-            let percent = if total > 0 {
-                (local_written as f64 / total as f64) * 100.0
-            } else {
-                0.0
-            };
-            let _ = app.emit(
-                "download-progress",
-                DownloadProgress {
-                    downloaded: local_written,
-                    total,
-                    speed_mbps,
-                    percent,
-                },
-            );
+            emit_download_progress(app, local_written, total, start_time, "running");
         }
     }
 
@@ -127,15 +239,7 @@ pub fn download_file(
 
     std::fs::rename(&tmp_path, &dest_path).map_err(|e| DownloadError::Io(e.to_string()))?;
 
-    let _ = app.emit(
-        "download-progress",
-        DownloadProgress {
-            downloaded: local_written,
-            total,
-            speed_mbps: 0.0,
-            percent: 100.0,
-        },
-    );
+    emit_download_progress(app, local_written, total, start_time, "complete");
 
     Ok(DownloadResult {
         path: dest_path.to_string_lossy().into_owned(),
@@ -187,7 +291,11 @@ pub fn list_model_dirs(models_root: &Path) -> Vec<ModelListing> {
             listings.push(ModelListing {
                 name: dir_name,
                 path: path.to_string_lossy().into_owned(),
-                format: if has_gguf { "gguf".into() } else { "safetensors".into() },
+                format: if has_gguf {
+                    "gguf".into()
+                } else {
+                    "safetensors".into()
+                },
                 size_bytes,
                 has_config,
             });

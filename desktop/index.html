@@ -17,6 +17,8 @@
           </div>
         </div>
         <div class="status-stack">
+          <button id="api-status-button" class="api-status-button stopped hidden" type="button" aria-label="API server status" title="API server stopped"></button>
+          <button id="download-status-button" class="icon-button download-status-button hidden" type="button" aria-label="Show active download">⬇</button>
           <button id="settings-button" class="icon-button settings-button" type="button" aria-label="Settings">⚙</button>
           <span id="engine-chip" class="chip">Engine unloaded</span>
           <span id="model-chip" class="chip muted">No model</span>
@@ -108,9 +110,22 @@
             </div>
           </section>
 
+          <!-- Generation queue -->
+          <section id="queue-panel" class="queue-panel hidden">
+            <div class="queue-head">
+              <div>
+                <h3>Queue Manager</h3>
+                <span id="queue-status" class="api-status-text">Idle</span>
+              </div>
+              <button id="queue-clear-btn" class="compact-button danger" type="button">Clear</button>
+            </div>
+            <div id="queue-active" class="queue-active">Nothing generating</div>
+            <div id="queue-list" class="queue-list"></div>
+          </section>
+
           <footer class="sidebar-footer">
-            <button id="github-link" class="footer-link" type="button">Saganaki22/Higgs-Audio-v3-Studio</button>
-            <button id="version-link" class="footer-link version-link" type="button">v0.1.0</button>
+            <button id="github-link" class="footer-link" type="button">★ Saganaki22/Higgs-Audio-v3-Studio</button>
+            <button id="version-link" class="footer-link version-link" type="button">v0.2.0</button>
           </footer>
         </aside>
 
@@ -123,6 +138,8 @@
             <button class="mode-tab" data-mode="clone" role="tab" aria-selected="false">Voice Clone</button>
             <button class="mode-tab" data-mode="finish" role="tab" aria-selected="false">Continue Speech</button>
             <button class="mode-tab" data-mode="multi" role="tab" aria-selected="false">Multi Speaker</button>
+            <button class="mode-tab" data-mode="api" role="tab" aria-selected="false">API</button>
+            <button class="mode-tab" data-mode="speakers" role="tab" aria-selected="false">Speaker Gallery</button>
             <button class="mode-tab" data-mode="history" role="tab" aria-selected="false">History</button>
           </div>
 
@@ -143,6 +160,13 @@
               <textarea id="clone-text" class="text-area" rows="4"
                 placeholder="Type or paste text here…"></textarea>
             </div>
+            <section class="identity-quick-panel input-group">
+              <label class="field-label" for="clone-persona-select">Saved speaker identity (optional)</label>
+              <div class="identity-select-row">
+                <select id="clone-persona-select" class="select-input"></select>
+              </div>
+              <p class="input-hint">Optional. Pick one from Speaker Gallery, or ignore this and upload a one-off reference below.</p>
+            </section>
             <div class="input-group">
               <label class="field-label">Reference voice</label>
               <div class="dropzone" id="clone-dropzone" tabindex="0" role="button"
@@ -160,6 +184,10 @@
                 </div>
                 <canvas class="ref-waveform" id="clone-ref-waveform"></canvas>
               </div>
+              <label class="inline-toggle reference-normalize-toggle">
+                <span>Normalize reference</span>
+                <span class="toggle-switch"><input type="checkbox" id="clone-normalize-ref" /><span class="toggle-slider"></span></span>
+              </label>
             </div>
             <div class="input-group">
               <div class="label-row">
@@ -168,8 +196,75 @@
               </div>
               <textarea id="clone-ref-text" class="text-area" rows="3"
                 placeholder="What the reference audio says…"></textarea>
-              <p class="input-hint">ⓘ Improves cloning fidelity. Leave blank to skip.</p>
+              <p class="input-hint">ⓘ Improves cloning fidelity. Leave blank to skip. Only clone voices you have permission to use.</p>
             </div>
+          </div>
+
+          <!-- ═══ Speaker Gallery mode ═══ -->
+          <div class="mode-content hidden" id="mode-speakers">
+            <section class="speaker-gallery-panel">
+              <div class="speaker-gallery-head">
+                <div>
+                  <h3>Speaker Gallery</h3>
+                  <span id="speaker-identity-count" class="api-status-text">0 saved</span>
+                </div>
+                <div class="identity-actions">
+                  <button id="speaker-add-btn" class="compact-button primary" type="button">+ Speaker</button>
+                  <button id="speaker-import-btn" class="compact-button" type="button">Import</button>
+                  <button id="speaker-export-btn" class="compact-button" type="button">Export</button>
+                  <button id="speaker-delete-btn" class="compact-button danger" type="button">Delete</button>
+                </div>
+              </div>
+              <input id="speaker-import-file" class="hidden" type="file" accept=".zip,.json,application/json,application/zip" />
+              <div class="speaker-gallery-layout">
+                <div id="speaker-gallery-list" class="speaker-gallery-list"></div>
+                <article id="speaker-gallery-editor" class="speaker-gallery-editor hidden">
+                  <div class="speaker-editor-head">
+                    <button id="speaker-gallery-photo-btn" class="speaker-photo-button" type="button" title="Add or replace display picture">
+                      <span id="speaker-gallery-avatar" class="speaker-avatar large">?</span>
+                    </button>
+                    <div class="speaker-editor-title">
+                      <label class="field-label" for="speaker-gallery-name">Speaker name</label>
+                      <input id="speaker-gallery-name" class="text-input" type="text" placeholder="Speaker name" />
+                    </div>
+                    <button id="speaker-gallery-photo-delete" class="compact-button" type="button">Remove photo</button>
+                  </div>
+                  <div class="input-group">
+                    <label class="field-label">Reference voice</label>
+                    <div class="dropzone" id="speaker-gallery-dropzone" tabindex="0" role="button"
+                         aria-label="Drop speaker reference audio or click to browse">
+                      <div class="dropzone-empty">
+                        <p>⤒ Drop reference voice here, or click to browse</p>
+                        <p class="dropzone-hint">mp3 · wav · flac · m4a</p>
+                      </div>
+                    </div>
+                    <div class="ref-preview hidden" id="gallery-ref-preview">
+                      <div class="ref-playback">
+                        <button class="ref-play" id="gallery-ref-play" type="button" aria-label="Play speaker reference">▶</button>
+                        <input class="ref-seek" id="gallery-ref-seek" type="range" min="0" max="1000" value="0" />
+                        <span class="ref-time" id="gallery-ref-time">00:00 / 00:00</span>
+                      </div>
+                      <canvas class="ref-waveform" id="gallery-ref-waveform"></canvas>
+                    </div>
+                    <label class="inline-toggle reference-normalize-toggle">
+                      <span>Normalize reference</span>
+                      <span class="toggle-switch"><input type="checkbox" id="speaker-gallery-normalize" /><span class="toggle-slider"></span></span>
+                    </label>
+                  </div>
+                  <div class="input-group">
+                    <div class="label-row">
+                      <label class="field-label" for="speaker-gallery-transcript">Reference transcript</label>
+                      <button id="speaker-gallery-auto" class="link-button" type="button">✦ Auto-transcribe</button>
+                    </div>
+                    <textarea id="speaker-gallery-transcript" class="text-area" rows="4" placeholder="What this reference voice says…"></textarea>
+                  </div>
+                  <div class="input-group">
+                    <label class="field-label" for="speaker-gallery-notes">Source / consent notes</label>
+                    <textarea id="speaker-gallery-notes" class="text-area" rows="3" placeholder="Where this reference came from, usage permission, character notes, etc."></textarea>
+                  </div>
+                </article>
+              </div>
+            </section>
           </div>
 
           <!-- ═══ Continue Speech mode ═══ -->
@@ -179,6 +274,13 @@
               <textarea id="finish-text" class="text-area" rows="3"
                 placeholder="What should be spoken after the input audio…"></textarea>
               <p class="input-hint">ⓘ The text to generate after the input audio ends.</p>
+            </div>
+            <div class="input-group identity-quick-panel">
+              <label class="field-label" for="finish-persona-select">Saved speaker identity</label>
+              <div class="identity-select-row">
+                <select id="finish-persona-select" class="select-input"></select>
+              </div>
+              <p class="input-hint">Optional. Use a saved speaker as the continuation source, or upload a one-off clip below.</p>
             </div>
             <div class="input-group">
               <label class="field-label">Audio to continue</label>
@@ -197,6 +299,10 @@
                 </div>
                 <canvas class="ref-waveform" id="finish-ref-waveform"></canvas>
               </div>
+              <label class="inline-toggle reference-normalize-toggle">
+                <span>Normalize reference</span>
+                <span class="toggle-switch"><input type="checkbox" id="finish-normalize-ref" /><span class="toggle-slider"></span></span>
+              </label>
             </div>
             <div class="input-group">
               <div class="label-row">
@@ -222,6 +328,8 @@
                   <input id="speaker-tags-input" class="text-input" type="text" placeholder="Speaker1, Speaker2, Speaker3" />
                   <button id="apply-speaker-tags" class="compact-button" type="button">Apply</button>
                   <button id="add-speaker-btn" class="compact-button" type="button">+ Speaker</button>
+                  <button id="multi-import-identities-btn" class="compact-button" type="button">Import IDs</button>
+                  <button id="multi-export-identities-btn" class="compact-button" type="button">Export IDs</button>
                 </div>
               </div>
               <div id="speaker-library" class="speaker-library"></div>
@@ -230,9 +338,16 @@
             <section class="workflow-section">
               <div class="section-head">
                 <h3>Speech Lines</h3>
-                <button id="add-line-btn" class="compact-button" type="button">+ Line</button>
+              </div>
+              <div class="script-import-box">
+                <textarea id="multi-script-input" class="text-area" rows="3" placeholder="[Speaker1] First line&#10;[Speaker2] Reply line"></textarea>
+                <button id="multi-script-import-btn" class="compact-button" type="button">Import tagged script</button>
               </div>
               <div id="multi-lines" class="multi-lines"></div>
+              <div class="line-action-row">
+                <button id="clear-lines-btn" class="compact-button danger" type="button">Clear lines</button>
+                <button id="add-line-btn" class="compact-button primary" type="button">+ Line</button>
+              </div>
             </section>
           </div>
 
@@ -371,6 +486,127 @@
             </div>
           </details>
 
+          <!-- ═══ API mode ═══ -->
+          <div class="mode-content hidden" id="mode-api">
+            <section class="api-panel">
+              <div class="api-panel-head">
+                <div>
+                  <h3>Local API</h3>
+                  <span id="api-status-text" class="api-status-text">Stopped</span>
+                </div>
+                <div class="api-actions">
+                  <button id="api-info-btn" class="compact-button" type="button">API Info</button>
+                  <button id="api-start-btn" class="compact-button primary" type="button">Start</button>
+                  <button id="api-stop-btn" class="compact-button danger" type="button" disabled>Stop</button>
+                </div>
+              </div>
+              <div class="api-grid">
+                <label class="api-field">
+                  <span>Host</span>
+                  <input id="api-host" class="text-input" type="text" value="127.0.0.1" />
+                </label>
+                <label class="api-field">
+                  <span>Port</span>
+                  <input id="api-port" class="text-input" type="number" min="1024" max="65535" value="7077" />
+                </label>
+                <label class="api-field api-key-field">
+                  <span>API key</span>
+                  <div class="api-key-control">
+                    <input id="api-key" class="text-input" type="password" autocomplete="off" spellcheck="false" />
+                    <button id="api-key-toggle" class="icon-button" type="button" aria-label="Show API key" title="Show API key">👁</button>
+                  </div>
+                </label>
+                <label class="api-field api-base-field">
+                  <span>Base URL</span>
+                  <input id="api-base-url" class="text-input" type="text" value="http://127.0.0.1:7077/v1" readonly />
+                </label>
+              </div>
+              <div class="api-button-row">
+                <button id="api-generate-key-btn" class="compact-button" type="button">Generate key</button>
+                <button id="api-copy-base-btn" class="compact-button" type="button">Copy base URL</button>
+                <button id="api-copy-key-btn" class="compact-button" type="button">Copy key</button>
+                <button id="api-copy-curl-btn" class="compact-button" type="button">Copy curl</button>
+              </div>
+            </section>
+
+            <section id="api-docs-panel" class="api-panel api-docs-panel hidden">
+              <div class="api-panel-head">
+                <div>
+                  <h3>API Info</h3>
+                  <span class="api-status-text">Examples use the current Base URL and API key.</span>
+                </div>
+                <div class="api-actions">
+                  <button id="api-copy-example-btn" class="compact-button" type="button">Copy example</button>
+                </div>
+              </div>
+              <div class="api-docs-grid">
+                <div class="api-reference">
+                  <h4>Endpoints</h4>
+                  <div class="api-route-list">
+                    <div><code>GET /health</code><span>No auth. Checks whether the local server is alive.</span></div>
+                    <div><code>GET /v1/status</code><span>Engine, model, and generation state.</span></div>
+                    <div><code>GET /v1/models</code><span>Detected local Higgs model folders.</span></div>
+                    <div><code>GET /v1/higgs/speakers</code><span>Saved speaker identities available as <code>speaker:&lt;id&gt;</code> voices.</span></div>
+                    <div><code>POST /v1/audio/speech</code><span>Plain TTS with the loaded model.</span></div>
+                    <div><code>POST /v1/higgs/audio/stream</code><span>Streaming TTS/clone/continue as newline JSON events with wav-base64 chunks.</span></div>
+                    <div><code>POST /v1/higgs/voice-clone</code><span>TTS with a reference audio file path.</span></div>
+                    <div><code>POST /v1/higgs/continue-speech</code><span>Continue an existing audio file.</span></div>
+                    <div><code>POST /v1/higgs/cancel</code><span>Cancel the active generation.</span></div>
+                  </div>
+                  <h4>Request Options</h4>
+                  <div class="api-options-table">
+                    <div><strong>Authorization</strong><span><code>Bearer API_KEY</code> header for every <code>/v1</code> route.</span></div>
+                    <div><strong>input</strong><span>Text to speak. Required for speech and voice clone.</span></div>
+                    <div><strong>voice</strong><span><code>default</code> for plain TTS, or <code>speaker:&lt;id&gt;</code> to use a saved speaker identity.</span></div>
+                    <div><strong>reference_audio_path</strong><span>Local path to WAV, MP3, FLAC, or M4A for voice clone.</span></div>
+                    <div><strong>reference_text</strong><span>Optional transcript for the reference voice.</span></div>
+                    <div><strong>audio_path</strong><span>Local path to the audio file used by continue speech.</span></div>
+                    <div><strong>continuation_text</strong><span>Optional text to speak after the input audio.</span></div>
+                    <div><strong>response_format</strong><span>Currently <code>wav</code> from the API.</span></div>
+                    <div><strong>stream events</strong><span><code>/higgs/audio/stream</code> returns <code>queued</code>, <code>start</code>, <code>progress</code>, <code>audio</code>, <code>final</code>, <code>done</code>, or <code>error</code> NDJSON events.</span></div>
+                    <div><strong>max_tokens</strong><span>Generation length limit.</span></div>
+                    <div><strong>temperature</strong><span>Randomness. Lower is steadier, higher is more varied.</span></div>
+                    <div><strong>top_p</strong><span>Nucleus sampling filter.</span></div>
+                    <div><strong>top_k</strong><span>Top token count filter.</span></div>
+                    <div><strong>seed</strong><span>Fixed seed for repeatability.</span></div>
+                  </div>
+                </div>
+                <div class="api-example-card">
+                  <div class="api-example-tabs" role="tablist" aria-label="API examples">
+                    <button class="api-example-tab active" data-api-example="curl" type="button">curl</button>
+                    <button class="api-example-tab" data-api-example="python" type="button">Python</button>
+                    <button class="api-example-tab" data-api-example="javascript" type="button">JavaScript</button>
+                    <button class="api-example-tab" data-api-example="powershell" type="button">PowerShell</button>
+                  </div>
+                  <pre class="api-example-code"><code id="api-example-code"></code></pre>
+                </div>
+              </div>
+            </section>
+
+            <section class="api-panel command-centre">
+              <div class="api-panel-head">
+                <div>
+                  <h3>Command Centre</h3>
+                  <span id="api-log-count" class="api-status-text">0 events</span>
+                </div>
+                <div class="api-actions">
+                  <select id="api-log-filter" class="select-input compact-select">
+                    <option value="all">All</option>
+                    <option value="info">Info</option>
+                    <option value="warn">Warnings</option>
+                    <option value="error">Errors</option>
+                    <option value="request">Requests</option>
+                    <option value="job">Jobs</option>
+                  </select>
+                  <button id="api-popout-log-btn" class="compact-button" type="button">Pop out</button>
+                  <button id="api-copy-log-btn" class="compact-button" type="button">Copy</button>
+                  <button id="api-clear-log-btn" class="compact-button" type="button">Clear</button>
+                </div>
+              </div>
+              <div id="api-command-log" class="api-command-log" aria-live="polite"></div>
+            </section>
+          </div>
+
           <!-- ═══ History mode ═══ -->
           <div class="mode-content hidden" id="mode-history">
             <div class="history-head">
@@ -385,6 +621,7 @@
           <!-- ═══ Generate / Cancel ═══ -->
           <div class="action-row" id="action-row">
             <button id="generate-btn" class="primary-btn" type="button">▶ Generate</button>
+            <button id="queue-btn" class="compact-button primary hidden" type="button">Add to Queue</button>
             <button id="cancel-btn" class="cancel-btn hidden" type="button">⏹ Cancel</button>
           </div>
 
@@ -402,7 +639,14 @@
             <div class="output-head">
               <h3>Output</h3>
               <div class="save-menu">
-                <button id="download-output-btn" class="compact-button" type="button">⬇ Save</button>
+                <button id="download-output-btn" class="compact-button icon-save-button" type="button" aria-label="Save audio" title="Save audio">
+                  <svg class="download-save-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" aria-hidden="true">
+                    <rect width="256" height="256" fill="none"/>
+                    <line x1="128" y1="144" x2="128" y2="32" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+                    <polyline points="216 144 216 208 40 208 40 144" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+                    <polyline points="168 104 128 144 88 104" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="16"/>
+                  </svg>
+                </button>
                 <div class="save-options" role="menu" aria-label="Save format">
                   <button class="save-format active" data-format="wav" type="button">✓ WAV</button>
                   <button class="save-format" data-format="mp3" type="button">MP3</button>
@@ -448,6 +692,17 @@
           <input id="ui-scale" type="range" min="90" max="115" value="100" />
           <span id="ui-scale-label">100%</span>
         </label>
+        <label class="settings-row settings-toggle">
+          <span>Stream playback during generation</span>
+          <span class="toggle-switch"><input type="checkbox" id="stream-playback" /><span class="toggle-slider"></span></span>
+        </label>
+        <p class="settings-hint">Requires a streaming-capable Higgs engine DLL. The current offline engine falls back to normal generation.</p>
+        <label class="settings-row settings-toggle">
+          <span>Minimize to tray on close</span>
+          <span class="toggle-switch"><input type="checkbox" id="minimize-to-tray" /><span class="toggle-slider"></span></span>
+        </label>
+        <p class="settings-hint">Keeps the API and loaded model running in the background. Click the tray icon to restore.</p>
+        <button id="quit-app-btn" class="compact-button danger full-width-button" type="button">Quit app</button>
       </div>
 
       <!-- ═══════════ Download popover ═══════════ -->
@@ -455,6 +710,10 @@
         <div class="settings-head">
           <strong id="download-title">Download Model</strong>
           <button id="download-close" class="popover-close" type="button" aria-label="Close">✕</button>
+        </div>
+        <div id="download-model-preset-row" class="download-preset-row">
+          <label class="field-label" for="download-model-preset">Model file</label>
+          <select id="download-model-preset" class="select-input"></select>
         </div>
         <div class="download-url-row">
           <input id="download-url-input" type="url" placeholder="Paste HuggingFace GGUF URL…" class="text-input" />
@@ -468,10 +727,38 @@
             <span id="download-size-text">0 / 0 GB</span>
             <span id="download-speed-text">0 MB/s</span>
           </div>
+          <div class="download-control-row">
+            <button id="download-pause-btn" class="compact-button" type="button">Pause</button>
+            <button id="download-resume-btn" class="compact-button" type="button" disabled>Resume</button>
+            <button id="download-stop-btn" class="compact-button danger" type="button">Stop</button>
+          </div>
         </div>
       </div>
 
+      <!-- ═══════════ Speaker export picker ═══════════ -->
+      <div id="speaker-export-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="speaker-export-title">
+        <section class="modal-panel speaker-export-panel">
+          <div class="modal-head">
+            <div>
+              <h3 id="speaker-export-title">Export Speakers</h3>
+              <span id="speaker-export-count" class="api-status-text">0 selected</span>
+            </div>
+            <button id="speaker-export-close" class="popover-close" type="button" aria-label="Close">✕</button>
+          </div>
+          <div class="export-actions">
+            <button id="speaker-export-select-all" class="compact-button" type="button">Select all</button>
+            <button id="speaker-export-select-none" class="compact-button" type="button">Select none</button>
+          </div>
+          <div id="speaker-export-list" class="speaker-export-list"></div>
+          <div class="modal-actions">
+            <button id="speaker-export-cancel" class="compact-button" type="button">Cancel</button>
+            <button id="speaker-export-confirm" class="compact-button primary" type="button">Export selected</button>
+          </div>
+        </section>
+      </div>
+
       <!-- ═══════════ Toast ═══════════ -->
+      <div id="tooltip-layer" class="tooltip-layer hidden" role="tooltip"></div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
       <!-- Hidden audio element for playback -->

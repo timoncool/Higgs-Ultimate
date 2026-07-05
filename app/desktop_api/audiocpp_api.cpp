@@ -8,13 +8,16 @@
 #include "engine/framework/runtime/model.h"
 #include "engine/framework/runtime/registry.h"
 #include "engine/framework/runtime/session.h"
+#include "engine/models/higgs_tts/session.h"
 
 #include "whisper.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -29,6 +32,7 @@ namespace {
 
 namespace rt = engine::runtime;
 namespace core = engine::core;
+namespace higgs = engine::models::higgs_tts;
 
 // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -153,12 +157,30 @@ struct EngineState {
     std::string last_error;
 
     audiocpp_progress_fn progress_fn = nullptr;
+    audiocpp_audio_chunk_fn audio_chunk_fn = nullptr;
     void * progress_user_data = nullptr;
 };
 
 void emit_progress(EngineState & state, int32_t current, int32_t total, const char * phase) {
     if (state.progress_fn != nullptr) {
         state.progress_fn(current, total, phase, state.progress_user_data);
+    }
+}
+
+void emit_audio_chunk(
+    EngineState & state,
+    const rt::AudioBuffer & audio,
+    int64_t start_sample,
+    bool is_final) {
+    if (state.audio_chunk_fn != nullptr && !audio.samples.empty()) {
+        state.audio_chunk_fn(
+            audio.sample_rate,
+            audio.channels,
+            start_sample,
+            audio.samples.data(),
+            audio.samples.size(),
+            is_final,
+            state.progress_user_data);
     }
 }
 
@@ -221,6 +243,69 @@ audiocpp_status run_generation(
 
     fill_result_ok(out_result, result.audio_output->sample_rate, result.audio_output->channels,
                    result.audio_output->samples);
+    return AUDIOCPP_OK;
+}
+
+audiocpp_status run_generation_streaming(
+    EngineState & state,
+    rt::TaskRequest & base_request,
+    audiocpp_audio_result * out_result) {
+
+    auto * higgs_session = dynamic_cast<higgs::HiggsTTSSession *>(state.offline);
+    if (higgs_session == nullptr) {
+        fill_result_err(out_result, "streaming is only supported by Higgs TTS sessions");
+        return AUDIOCPP_ERR_UNSUPPORTED;
+    }
+
+    emit_progress(state, 0, 4, "preparing");
+    bool emitted_first_audio = false;
+    rt::TaskResult result;
+    try {
+        result = higgs_session->run_streaming(
+            base_request,
+            [&](const rt::AudioBuffer & chunk, int64_t start_sample, bool is_final) {
+                if (is_cancelled(state)) {
+                    return false;
+                }
+                if (!emitted_first_audio) {
+                    emitted_first_audio = true;
+                    emit_progress(state, 1, 4, "first audio");
+                } else {
+                    emit_progress(state, 2, 4, "streaming");
+                }
+                emit_audio_chunk(state, chunk, start_sample, is_final);
+                return !is_cancelled(state);
+            },
+            [&](int64_t current, int64_t total, const char * phase) {
+                if (is_cancelled(state)) {
+                    return false;
+                }
+                emit_progress(
+                    state,
+                    static_cast<int32_t>(std::min<int64_t>(current, std::numeric_limits<int32_t>::max())),
+                    static_cast<int32_t>(std::min<int64_t>(total, std::numeric_limits<int32_t>::max())),
+                    phase);
+                return !is_cancelled(state);
+            });
+    } catch (...) {
+        state.last_error = capture_exception_message();
+        if (is_cancelled(state) || state.last_error.find("cancelled") != std::string::npos) {
+            fill_result_err(out_result, "generation cancelled");
+            return AUDIOCPP_ERR_CANCELLED;
+        }
+        fill_result_err(out_result, state.last_error);
+        return AUDIOCPP_ERR_RUNTIME;
+    }
+
+    if (!result.audio_output.has_value()) {
+        fill_result_err(out_result, "no audio output produced");
+        return AUDIOCPP_ERR_RUNTIME;
+    }
+
+    emit_progress(state, 3, 4, "finalizing");
+    fill_result_ok(out_result, result.audio_output->sample_rate, result.audio_output->channels,
+                   result.audio_output->samples);
+    emit_progress(state, 4, 4, "complete");
     return AUDIOCPP_OK;
 }
 
@@ -395,6 +480,7 @@ AUDIOCPP_API audiocpp_status audiocpp_generate_tts(
         }
 
         state.progress_fn = progress;
+        state.audio_chunk_fn = nullptr;
         state.progress_user_data = user_data;
         state.generating.store(true, std::memory_order_relaxed);
         state.cancel_requested.store(false, std::memory_order_relaxed);
@@ -440,6 +526,7 @@ AUDIOCPP_API audiocpp_status audiocpp_generate_voice_clone(
         }
 
         state.progress_fn = progress;
+        state.audio_chunk_fn = nullptr;
         state.progress_user_data = user_data;
         state.generating.store(true, std::memory_order_relaxed);
         state.cancel_requested.store(false, std::memory_order_relaxed);
@@ -485,6 +572,7 @@ AUDIOCPP_API audiocpp_status audiocpp_generate_finish_sentence(
         }
 
         state.progress_fn = progress;
+        state.audio_chunk_fn = nullptr;
         state.progress_user_data = user_data;
         state.generating.store(true, std::memory_order_relaxed);
         state.cancel_requested.store(false, std::memory_order_relaxed);
@@ -509,6 +597,160 @@ AUDIOCPP_API audiocpp_status audiocpp_generate_finish_sentence(
     } catch (...) {
         if (handle != nullptr) {
             handle->state.generating.store(false, std::memory_order_relaxed);
+            handle->state.last_error = capture_exception_message();
+            fill_result_err(out_result, handle->state.last_error);
+        }
+        return AUDIOCPP_ERR_RUNTIME;
+    }
+}
+
+AUDIOCPP_API audiocpp_status audiocpp_generate_tts_stream(
+    audiocpp_engine *       handle,
+    const char *            text,
+    const char *            options_json,
+    audiocpp_progress_fn    progress,
+    audiocpp_audio_chunk_fn audio_chunk,
+    void *                  user_data,
+    audiocpp_audio_result * out_result) {
+    zero_result(out_result);
+    try {
+        if (handle == nullptr || text == nullptr || out_result == nullptr) {
+            return AUDIOCPP_ERR_INVALID_PARAM;
+        }
+        auto & state = handle->state;
+        std::lock_guard<std::mutex> lock(state.mutex);
+
+        if (state.offline == nullptr) {
+            fill_result_err(out_result, "model not loaded");
+            return AUDIOCPP_ERR_NOT_LOADED;
+        }
+
+        state.progress_fn = progress;
+        state.audio_chunk_fn = audio_chunk;
+        state.progress_user_data = user_data;
+        state.generating.store(true, std::memory_order_relaxed);
+        state.cancel_requested.store(false, std::memory_order_relaxed);
+
+        rt::TaskRequest request;
+        request.text_input = rt::Transcript{std::string(text), ""};
+        request.options = parse_options_json(options_json);
+
+        auto status = run_generation_streaming(state, request, out_result);
+
+        state.generating.store(false, std::memory_order_relaxed);
+        state.audio_chunk_fn = nullptr;
+        return status;
+    } catch (...) {
+        if (handle != nullptr) {
+            handle->state.generating.store(false, std::memory_order_relaxed);
+            handle->state.audio_chunk_fn = nullptr;
+            handle->state.last_error = capture_exception_message();
+            fill_result_err(out_result, handle->state.last_error);
+        }
+        return AUDIOCPP_ERR_RUNTIME;
+    }
+}
+
+AUDIOCPP_API audiocpp_status audiocpp_generate_voice_clone_stream(
+    audiocpp_engine *       handle,
+    const char *            text,
+    const char *            ref_audio_path,
+    const char *            ref_text,
+    const char *            options_json,
+    audiocpp_progress_fn    progress,
+    audiocpp_audio_chunk_fn audio_chunk,
+    void *                  user_data,
+    audiocpp_audio_result * out_result) {
+    zero_result(out_result);
+    try {
+        if (handle == nullptr || text == nullptr || ref_audio_path == nullptr || out_result == nullptr) {
+            return AUDIOCPP_ERR_INVALID_PARAM;
+        }
+        auto & state = handle->state;
+        std::lock_guard<std::mutex> lock(state.mutex);
+
+        if (state.offline == nullptr) {
+            fill_result_err(out_result, "model not loaded");
+            return AUDIOCPP_ERR_NOT_LOADED;
+        }
+
+        state.progress_fn = progress;
+        state.audio_chunk_fn = audio_chunk;
+        state.progress_user_data = user_data;
+        state.generating.store(true, std::memory_order_relaxed);
+        state.cancel_requested.store(false, std::memory_order_relaxed);
+
+        rt::TaskRequest request;
+        request.text_input = rt::Transcript{std::string(text), ""};
+        request.options = parse_options_json(options_json);
+        fill_voice_reference(request, ref_audio_path, ref_text);
+
+        auto status = run_generation_streaming(state, request, out_result);
+
+        state.generating.store(false, std::memory_order_relaxed);
+        state.audio_chunk_fn = nullptr;
+        return status;
+    } catch (...) {
+        if (handle != nullptr) {
+            handle->state.generating.store(false, std::memory_order_relaxed);
+            handle->state.audio_chunk_fn = nullptr;
+            handle->state.last_error = capture_exception_message();
+            fill_result_err(out_result, handle->state.last_error);
+        }
+        return AUDIOCPP_ERR_RUNTIME;
+    }
+}
+
+AUDIOCPP_API audiocpp_status audiocpp_generate_finish_sentence_stream(
+    audiocpp_engine *       handle,
+    const char *            audio_path,
+    const char *            continuation_text,
+    const char *            options_json,
+    audiocpp_progress_fn    progress,
+    audiocpp_audio_chunk_fn audio_chunk,
+    void *                  user_data,
+    audiocpp_audio_result * out_result) {
+    zero_result(out_result);
+    try {
+        if (handle == nullptr || audio_path == nullptr || out_result == nullptr) {
+            return AUDIOCPP_ERR_INVALID_PARAM;
+        }
+        auto & state = handle->state;
+        std::lock_guard<std::mutex> lock(state.mutex);
+
+        if (state.offline == nullptr) {
+            fill_result_err(out_result, "model not loaded");
+            return AUDIOCPP_ERR_NOT_LOADED;
+        }
+
+        state.progress_fn = progress;
+        state.audio_chunk_fn = audio_chunk;
+        state.progress_user_data = user_data;
+        state.generating.store(true, std::memory_order_relaxed);
+        state.cancel_requested.store(false, std::memory_order_relaxed);
+
+        rt::TaskRequest request;
+        if (continuation_text != nullptr && continuation_text[0] != '\0') {
+            request.text_input = rt::Transcript{std::string(continuation_text), ""};
+        }
+        request.options = parse_options_json(options_json);
+        request.options["route"] = "audio_continuation";
+
+        rt::VoiceCondition voice;
+        rt::VoiceReference ref;
+        ref.audio = read_wav_buffer(audio_path);
+        voice.speaker = std::move(ref);
+        request.voice = std::move(voice);
+
+        auto status = run_generation_streaming(state, request, out_result);
+
+        state.generating.store(false, std::memory_order_relaxed);
+        state.audio_chunk_fn = nullptr;
+        return status;
+    } catch (...) {
+        if (handle != nullptr) {
+            handle->state.generating.store(false, std::memory_order_relaxed);
+            handle->state.audio_chunk_fn = nullptr;
             handle->state.last_error = capture_exception_message();
             fill_result_err(out_result, handle->state.last_error);
         }

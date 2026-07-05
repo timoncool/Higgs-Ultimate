@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -13,7 +14,11 @@ pub enum AudioError {
 /// Otherwise, decode it with symphonia and write a temp WAV, return that path.
 pub fn ensure_wav(path: &str) -> Result<String, AudioError> {
     let p = Path::new(path);
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
 
     if ext == "wav" {
         return Ok(path.to_string());
@@ -30,10 +35,58 @@ pub fn ensure_wav(path: &str) -> Result<String, AudioError> {
     );
     let temp_path = temp_dir.join(temp_name);
     let wav_bytes = encode_pcm16_wav(&samples, sample_rate, channels);
-    std::fs::write(&temp_path, &wav_bytes)
-        .map_err(|e| AudioError::Io(e.to_string()))?;
+    std::fs::write(&temp_path, &wav_bytes).map_err(|e| AudioError::Io(e.to_string()))?;
 
     Ok(temp_path.to_string_lossy().into_owned())
+}
+
+pub fn normalize_to_temp_wav(path: &str, target_peak: f32) -> Result<String, AudioError> {
+    let p = Path::new(path);
+    let (samples, sample_rate, channels) = decode_any_format(path)?;
+    let peak = samples
+        .iter()
+        .fold(0.0f32, |max, value| max.max(value.abs()));
+    let target = target_peak.clamp(0.01, 1.0);
+    let gain = if peak > 0.00001 { target / peak } else { 1.0 };
+    let normalized: Vec<f32> = samples
+        .iter()
+        .map(|sample| (sample * gain).clamp(-1.0, 1.0))
+        .collect();
+    let temp_dir = std::env::temp_dir();
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    let temp_name = format!(
+        "higgs_norm_{}_{}.wav",
+        p.file_stem().and_then(|s| s.to_str()).unwrap_or("audio"),
+        stamp
+    );
+    let temp_path = temp_dir.join(temp_name);
+    let wav_bytes = encode_pcm16_wav(&normalized, sample_rate, channels);
+    std::fs::write(&temp_path, &wav_bytes).map_err(|e| AudioError::Io(e.to_string()))?;
+    Ok(temp_path.to_string_lossy().into_owned())
+}
+
+pub fn waveform_peaks(path: &str, points: usize) -> Result<Vec<f32>, AudioError> {
+    let (samples, _, _) = decode_any_format(path)?;
+    if samples.is_empty() {
+        return Ok(Vec::new());
+    }
+    let points = points.clamp(64, 4096).min(samples.len().max(1));
+    let mut peaks = Vec::with_capacity(points);
+    for i in 0..points {
+        let start = i * samples.len() / points;
+        let end = ((i + 1) * samples.len() / points)
+            .max(start + 1)
+            .min(samples.len());
+        let peak = samples[start..end]
+            .iter()
+            .fold(0.0f32, |max, value| max.max(value.abs()))
+            .min(1.0);
+        peaks.push(peak);
+    }
+    Ok(peaks)
 }
 
 pub fn decode_to_pcm16_wav(
@@ -41,7 +94,9 @@ pub fn decode_to_pcm16_wav(
     target_sample_rate: Option<i32>,
 ) -> Result<(Vec<u8>, i32, i32, usize), AudioError> {
     let (samples, source_rate, channels) = decode_any_format(path)?;
-    let sample_rate = target_sample_rate.filter(|rate| *rate > 0).unwrap_or(source_rate);
+    let sample_rate = target_sample_rate
+        .filter(|rate| *rate > 0)
+        .unwrap_or(source_rate);
     let samples = if sample_rate != source_rate {
         resample_linear_mono(&samples, source_rate, sample_rate)
     } else {
@@ -70,12 +125,12 @@ fn resample_linear_mono(samples: &[f32], source_rate: i32, target_rate: i32) -> 
 }
 
 fn decode_any_format(path: &str) -> Result<(Vec<f32>, i32, i32), AudioError> {
+    use symphonia::core::audio::{AudioBufferRef, Signal};
     use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;
     use symphonia::core::probe::Hint;
-    use symphonia::core::audio::{AudioBufferRef, Signal};
 
     let file = std::fs::File::open(path).map_err(|e| AudioError::Io(e.to_string()))?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
@@ -87,7 +142,12 @@ fn decode_any_format(path: &str) -> Result<(Vec<f32>, i32, i32), AudioError> {
 
     let prober = symphonia::default::get_probe();
     let probe_result = prober
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
         .map_err(|e| AudioError::Decode(format!("probe failed: {e}")))?;
     let mut format = probe_result.format;
 
@@ -129,35 +189,45 @@ fn decode_any_format(path: &str) -> Result<(Vec<f32>, i32, i32), AudioError> {
                     AudioBufferRef::F32(ref buf) => {
                         for f in 0..num_frames {
                             let mut v = 0.0f32;
-                            for c in 0..num_ch { v += buf.chan(c)[f]; }
+                            for c in 0..num_ch {
+                                v += buf.chan(c)[f];
+                            }
                             samples.push(v / num_ch as f32);
                         }
                     }
                     AudioBufferRef::S16(ref buf) => {
                         for f in 0..num_frames {
                             let mut v = 0.0f32;
-                            for c in 0..num_ch { v += buf.chan(c)[f] as f32 / 32768.0; }
+                            for c in 0..num_ch {
+                                v += buf.chan(c)[f] as f32 / 32768.0;
+                            }
                             samples.push(v / num_ch as f32);
                         }
                     }
                     AudioBufferRef::S32(ref buf) => {
                         for f in 0..num_frames {
                             let mut v = 0.0f32;
-                            for c in 0..num_ch { v += buf.chan(c)[f] as f32 / 2147483648.0; }
+                            for c in 0..num_ch {
+                                v += buf.chan(c)[f] as f32 / 2147483648.0;
+                            }
                             samples.push(v / num_ch as f32);
                         }
                     }
                     AudioBufferRef::U8(ref buf) => {
                         for f in 0..num_frames {
                             let mut v = 0.0f32;
-                            for c in 0..num_ch { v += (buf.chan(c)[f] as f32 - 128.0) / 128.0; }
+                            for c in 0..num_ch {
+                                v += (buf.chan(c)[f] as f32 - 128.0) / 128.0;
+                            }
                             samples.push(v / num_ch as f32);
                         }
                     }
                     AudioBufferRef::F64(ref buf) => {
                         for f in 0..num_frames {
                             let mut v = 0.0f32;
-                            for c in 0..num_ch { v += buf.chan(c)[f] as f32; }
+                            for c in 0..num_ch {
+                                v += buf.chan(c)[f] as f32;
+                            }
                             samples.push(v / num_ch as f32);
                         }
                     }
@@ -167,7 +237,9 @@ fn decode_any_format(path: &str) -> Result<(Vec<f32>, i32, i32), AudioError> {
                         decoded.convert(&mut f32_buf);
                         for f in 0..num_frames {
                             let mut v = 0.0f32;
-                            for c in 0..num_ch { v += f32_buf.chan(c)[f]; }
+                            for c in 0..num_ch {
+                                v += f32_buf.chan(c)[f];
+                            }
                             samples.push(v / num_ch as f32);
                         }
                     }

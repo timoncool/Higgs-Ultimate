@@ -86,6 +86,16 @@ typedef struct audiocpp_model_info {
 /* Progress callback: current step, total steps, phase label, user data. */
 typedef void (*audiocpp_progress_fn)(int32_t current, int32_t total, const char * phase, void * user_data);
 
+/* Streaming audio callback. `samples` is only valid for the duration of the callback. */
+typedef void (*audiocpp_audio_chunk_fn)(
+    int32_t sample_rate,
+    int32_t channels,
+    int64_t start_sample,
+    const float * samples,
+    size_t sample_count,
+    bool is_final,
+    void * user_data);
+
 /* --- lifecycle --- */
 
 AUDIOCPP_API audiocpp_engine * audiocpp_create(void);
@@ -142,6 +152,36 @@ AUDIOCPP_API audiocpp_status audiocpp_generate_finish_sentence(
     const char *            continuation_text,
     const char *            options_json,
     audiocpp_progress_fn    progress,
+    void *                  user_data,
+    audiocpp_audio_result * out_result);
+
+AUDIOCPP_API audiocpp_status audiocpp_generate_tts_stream(
+    audiocpp_engine *       engine,
+    const char *            text,
+    const char *            options_json,
+    audiocpp_progress_fn    progress,
+    audiocpp_audio_chunk_fn audio_chunk,
+    void *                  user_data,
+    audiocpp_audio_result * out_result);
+
+AUDIOCPP_API audiocpp_status audiocpp_generate_voice_clone_stream(
+    audiocpp_engine *       engine,
+    const char *            text,
+    const char *            ref_audio_path,
+    const char *            ref_text,
+    const char *            options_json,
+    audiocpp_progress_fn    progress,
+    audiocpp_audio_chunk_fn audio_chunk,
+    void *                  user_data,
+    audiocpp_audio_result * out_result);
+
+AUDIOCPP_API audiocpp_status audiocpp_generate_finish_sentence_stream(
+    audiocpp_engine *       engine,
+    const char *            audio_path,
+    const char *            continuation_text,
+    const char *            options_json,
+    audiocpp_progress_fn    progress,
+    audiocpp_audio_chunk_fn audio_chunk,
     void *                  user_data,
     audiocpp_audio_result * out_result);
 
