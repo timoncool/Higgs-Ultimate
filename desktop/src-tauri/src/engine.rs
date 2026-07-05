@@ -1,5 +1,6 @@
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
+use shine_rs::{encode_pcm_to_mp3, Mp3EncoderConfig, StereoMode};
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::os::raw::{c_float, c_int};
 use std::path::Path;
@@ -59,6 +60,60 @@ impl AudioResult {
     pub fn encode_base64_wav(&self) -> String {
         base64_encode(&self.encode_pcm16_wav())
     }
+
+    pub fn encode_mp3(&self) -> Result<Vec<u8>, String> {
+        if self.samples.is_empty() {
+            return Err("cannot encode empty audio".to_string());
+        }
+        let source_channels = self.channels.max(1) as usize;
+        let sample_rate = self.sample_rate.max(1) as u32;
+        if !shine_rs::SUPPORTED_SAMPLE_RATES.contains(&sample_rate) {
+            return Err(format!(
+                "MP3 encoder does not support {} Hz output",
+                self.sample_rate
+            ));
+        }
+
+        let (pcm, channels, stereo_mode) = if source_channels <= 2 {
+            (
+                self.samples
+                    .iter()
+                    .map(|sample| f32_to_pcm16(*sample))
+                    .collect::<Vec<_>>(),
+                source_channels as u8,
+                if source_channels == 1 {
+                    StereoMode::Mono
+                } else {
+                    StereoMode::JointStereo
+                },
+            )
+        } else {
+            let mut mono = Vec::with_capacity(self.samples.len() / source_channels + 1);
+            for frame in self.samples.chunks(source_channels) {
+                let mixed = frame.iter().copied().sum::<f32>() / frame.len().max(1) as f32;
+                mono.push(f32_to_pcm16(mixed));
+            }
+            (mono, 1, StereoMode::Mono)
+        };
+
+        let bitrate = if sample_rate <= 12_000 {
+            64
+        } else if sample_rate <= 24_000 {
+            128
+        } else {
+            192
+        };
+        let config = Mp3EncoderConfig::new()
+            .sample_rate(sample_rate)
+            .bitrate(bitrate)
+            .channels(channels)
+            .stereo_mode(stereo_mode);
+        encode_pcm_to_mp3(config, &pcm).map_err(|e| e.to_string())
+    }
+}
+
+fn f32_to_pcm16(sample: f32) -> i16 {
+    (sample.clamp(-1.0, 1.0) * 32767.0).round() as i16
 }
 
 fn base64_encode(data: &[u8]) -> String {

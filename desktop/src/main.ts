@@ -221,13 +221,13 @@ type WavPcm = {
 
 type LiveStreamState = {
   context: AudioContext;
-  nextTime: number;
-  started: boolean;
-  sources: AudioBufferSourceNode[];
-  firstStartTime: number;
+  processor: ScriptProcessorNode;
   sampleRate: number;
   channels: number;
   receivedFrames: number;
+  playbackFrame: number;
+  playing: boolean;
+  pcm: Float32Array;
   finalized: boolean;
   finalObjectUrl: string | null;
   finalDuration: number;
@@ -494,7 +494,7 @@ async function openExternalUrl(url: string): Promise<void> {
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 
-const APP_VERSION = "0.2.0";
+const APP_VERSION = "0.2.1";
 const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 const RELEASES_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases";
 const HIGGS_MODEL_RESOLVE_BASE = "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main";
@@ -1023,7 +1023,7 @@ print(requests.get(f"{BASE_URL}/status", headers=HEADERS, timeout=10).json())
 print(requests.get(f"{BASE_URL}/models", headers=HEADERS, timeout=10).json())
 print(requests.get(f"{BASE_URL}/higgs/speakers", headers=HEADERS, timeout=10).json())
 
-# Plain TTS.
+# Plain TTS. Finished-file routes support "wav" or "mp3".
 speech = requests.post(
     f"{BASE_URL}/audio/speech",
     headers=HEADERS,
@@ -1031,7 +1031,7 @@ speech = requests.post(
         "model": "current",
         "input": "Hello from the Higgs Studio API.",
         "voice": "default",
-        "response_format": "wav",
+        "response_format": "mp3",
         "max_tokens": 2048,
         "temperature": 1.0,
         "top_p": 0.95,
@@ -1041,7 +1041,7 @@ speech = requests.post(
     timeout=600,
 )
 speech.raise_for_status()
-open("speech.wav", "wb").write(speech.content)
+open("speech.mp3", "wb").write(speech.content)
 
 # Saved speaker identity clone through the OpenAI-style route.
 speaker = requests.post(
@@ -1090,7 +1090,8 @@ continued = requests.post(
 continued.raise_for_status()
 open("continued.wav", "wb").write(continued.content)
 
-# Streaming TTS. Each response line is one JSON event.
+# Streaming TTS. Each response line is one JSON event. Audio events carry wavBase64 chunks;
+# decode/play those chunks as they arrive, then keep the final wavBase64 event as the clean file.
 with requests.post(
     f"{BASE_URL}/higgs/audio/stream",
     headers=HEADERS,
@@ -1143,7 +1144,7 @@ const speech = await fetch(\`\${BASE_URL}/audio/speech\`, {
     model: "current",
     input: "Hello from the Higgs Studio API.",
     voice: "default", // Or "${speakerVoice}" for a saved speaker identity.
-    response_format: "wav",
+    response_format: "mp3",
     max_tokens: 2048,
     temperature: 1.0,
     top_p: 0.95,
@@ -1152,7 +1153,7 @@ const speech = await fetch(\`\${BASE_URL}/audio/speech\`, {
   }),
 });
 if (!speech.ok) throw new Error(await speech.text());
-await writeFile("speech.wav", Buffer.from(await speech.arrayBuffer()));
+await writeFile("speech.mp3", Buffer.from(await speech.arrayBuffer()));
 
 const savedSpeaker = await fetch(\`\${BASE_URL}/audio/speech\`, {
   method: "POST",
@@ -1218,6 +1219,8 @@ while (true) {
   for (const line of lines) {
     if (!line.trim()) continue;
     const event = JSON.parse(line);
+    // event.event === "audio" has wavBase64 for live playback.
+    // event.event === "final" has wavBase64 for the finished clean file.
     console.log(event.event, event.phase || event.sampleCount || "");
   }
 }
@@ -1240,19 +1243,19 @@ Invoke-RestMethod -Uri "$BaseUrl/status" -Method Get -Headers $Headers
 Invoke-RestMethod -Uri "$BaseUrl/models" -Method Get -Headers $Headers
 Invoke-RestMethod -Uri "$BaseUrl/higgs/speakers" -Method Get -Headers $Headers
 
-# Plain TTS.
+# Plain TTS. Finished-file routes support "wav" or "mp3".
 $SpeechBody = @{
   model = "current"
   input = "Hello from the Higgs Studio API."
   voice = "default"
-  response_format = "wav"
+  response_format = "mp3"
   max_tokens = 2048
   temperature = 1.0
   top_p = 0.95
   top_k = 50
   seed = 1234
 } | ConvertTo-Json
-Invoke-WebRequest -Uri "$BaseUrl/audio/speech" -Method Post -Headers $Headers -Body $SpeechBody -OutFile "speech.wav"
+Invoke-WebRequest -Uri "$BaseUrl/audio/speech" -Method Post -Headers $Headers -Body $SpeechBody -OutFile "speech.mp3"
 
 # Saved speaker identity clone through the OpenAI-style route.
 $SpeakerBody = @{
@@ -1283,7 +1286,8 @@ $ContinueBody = @{
 } | ConvertTo-Json
 Invoke-WebRequest -Uri "$BaseUrl/higgs/continue-speech" -Method Post -Headers $Headers -Body $ContinueBody -OutFile "continued.wav"
 
-# Streaming TTS. Each line is a JSON event.
+# Streaming TTS. Each line is a JSON event. Audio events include wavBase64 chunks for playback;
+# final includes the clean finished wavBase64 file.
 $StreamBody = @{
   input = "This streams progress and wav-base64 chunks."
   voice = "default"
@@ -1311,12 +1315,12 @@ curl "${base}/models" \\
 curl "${base}/higgs/speakers" \\
   -H "Authorization: Bearer ${key}"
 
-# Plain TTS.
+# Plain TTS. Finished-file routes support "wav" or "mp3".
 curl -X POST "${base}/audio/speech" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"current","input":"Hello from the Higgs Studio API.","voice":"default","response_format":"wav","max_tokens":2048,"temperature":1.0,"top_p":0.95,"top_k":50,"seed":1234}' \\
-  --output speech.wav
+  -d '{"model":"current","input":"Hello from the Higgs Studio API.","voice":"default","response_format":"mp3","max_tokens":2048,"temperature":1.0,"top_p":0.95,"top_k":50,"seed":1234}' \\
+  --output speech.mp3
 
 # Saved speaker identity clone through the OpenAI-style route.
 curl -X POST "${base}/audio/speech" \\
@@ -1339,7 +1343,8 @@ curl -X POST "${base}/higgs/continue-speech" \\
   -d '{"audio_path":"C:\\\\voices\\\\start.wav","continuation_text":"and this is the continuation.","response_format":"wav","max_tokens":2048}' \\
   --output continued.wav
 
-# Streaming TTS as newline-delimited JSON events.
+# Streaming TTS as newline-delimited JSON events. Audio events include wavBase64 chunks
+# for live playback; final includes the clean finished wavBase64 file.
 curl -N -X POST "${base}/higgs/audio/stream" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
@@ -4281,9 +4286,8 @@ function initGenerate(): void {
 
 function stopLiveStreamPreview(): void {
   if (!liveStream) return;
-  for (const source of liveStream.sources) {
-    try { source.stop(); } catch { /* already stopped */ }
-  }
+  liveStream.processor.onaudioprocess = null;
+  try { liveStream.processor.disconnect(); } catch { /* already disconnected */ }
   if (liveStream.finalObjectUrl) URL.revokeObjectURL(liveStream.finalObjectUrl);
   void liveStream.context.close().catch(() => {});
   liveStream = null;
@@ -4296,6 +4300,10 @@ function startLiveStreamPreview(): void {
   const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
   if (!AudioContextCtor) return;
   const context = new AudioContextCtor();
+  const processor = context.createScriptProcessor(1024, 0, 2);
+  processor.onaudioprocess = processLiveStreamAudio;
+  processor.connect(context.destination);
+  void context.resume().catch(() => {});
   lastResult = null;
   waveformBuildToken += 1;
   if (!audioPlayer.paused) audioPlayer.pause();
@@ -4309,18 +4317,49 @@ function startLiveStreamPreview(): void {
   drawWaveform();
   liveStream = {
     context,
-    nextTime: context.currentTime + 0.12,
-    started: false,
-    sources: [],
-    firstStartTime: 0,
+    processor,
     sampleRate: 0,
     channels: 0,
     receivedFrames: 0,
+    playbackFrame: 0,
+    playing: true,
+    pcm: new Float32Array(0),
     finalized: false,
     finalObjectUrl: null,
     finalDuration: 0,
   };
   startWaveLoop();
+}
+
+function processLiveStreamAudio(event: AudioProcessingEvent): void {
+  const stream = liveStream;
+  const output = event.outputBuffer;
+  const outputs = Array.from({ length: output.numberOfChannels }, (_, channel) => output.getChannelData(channel));
+  for (const channel of outputs) channel.fill(0);
+  if (!stream || !stream.playing || !stream.sampleRate || !stream.channels || stream.receivedFrames <= 0) return;
+
+  const rateRatio = stream.sampleRate / stream.context.sampleRate;
+  const frameCount = output.length;
+  for (let outFrame = 0; outFrame < frameCount; outFrame++) {
+    if (stream.playbackFrame >= stream.receivedFrames) {
+      if (stream.finalized && stream.finalObjectUrl) {
+        stream.playing = false;
+        requestAnimationFrame(() => completeLiveStreamToFinalPlayer(true));
+      }
+      break;
+    }
+
+    const baseFrame = Math.floor(stream.playbackFrame);
+    const frac = stream.playbackFrame - baseFrame;
+    const nextFrame = Math.min(baseFrame + 1, stream.receivedFrames - 1);
+    for (let outChannel = 0; outChannel < outputs.length; outChannel++) {
+      const sourceChannel = stream.channels === 1 ? 0 : Math.min(outChannel, stream.channels - 1);
+      const a = stream.pcm[baseFrame * stream.channels + sourceChannel] || 0;
+      const b = stream.pcm[nextFrame * stream.channels + sourceChannel] || a;
+      outputs[outChannel][outFrame] = a + (b - a) * frac;
+    }
+    stream.playbackFrame += rateRatio;
+  }
 }
 
 function scheduleLiveAudioChunk(event: GenerationAudioChunkEvent): void {
@@ -4330,60 +4369,71 @@ function scheduleLiveAudioChunk(event: GenerationAudioChunkEvent): void {
     if (pcm.samples.length === 0) return;
     const frames = Math.floor(pcm.samples.length / pcm.channels);
     if (frames <= 0) return;
-    liveStream.sampleRate = pcm.sampleRate;
-    liveStream.channels = pcm.channels;
-    liveStream.receivedFrames += frames;
-    appendLiveWaveformSamples(pcm);
-    const buffer = liveStream.context.createBuffer(pcm.channels, frames, pcm.sampleRate);
-    for (let channel = 0; channel < pcm.channels; channel++) {
-      const out = buffer.getChannelData(channel);
-      for (let frame = 0; frame < frames; frame++) {
-        out[frame] = pcm.samples[frame * pcm.channels + channel] / 32768;
-      }
-    }
-    const source = liveStream.context.createBufferSource();
-    source.buffer = buffer;
-    source.connect(liveStream.context.destination);
-    const startAt = Math.max(liveStream.nextTime, liveStream.context.currentTime + 0.04);
-    if (!liveStream.started) {
-      liveStream.started = true;
-      liveStream.firstStartTime = startAt;
+    if (!liveStream.sampleRate || !liveStream.channels) {
+      liveStream.sampleRate = pcm.sampleRate;
+      liveStream.channels = pcm.channels;
       setText("#gen-progress-text", "First audio streaming...");
     }
-    source.start(startAt);
-    liveStream.nextTime = startAt + buffer.duration;
-    liveStream.sources.push(source);
-    source.onended = () => {
-      if (liveStream) {
-        liveStream.sources = liveStream.sources.filter((item) => item !== source);
-        if (liveStream.finalized && liveStream.sources.length === 0) {
-          completeLiveStreamToFinalPlayer();
-        }
-      }
-    };
+    if (liveStream.sampleRate !== pcm.sampleRate || liveStream.channels !== pcm.channels) return;
+    const hintedStart = Number.isFinite(event.startSample) && event.startSample >= 0
+      ? Math.floor(event.startSample / pcm.channels)
+      : liveStream.receivedFrames;
+    placeLivePcmChunk(pcm, Math.max(0, hintedStart));
     updateOutputTimeLabel();
     drawWaveform();
-    if (liveStream.context.state === "running") startWaveLoop();
+    startWaveLoop();
   } catch {
     // Streaming preview is best-effort; final output still arrives normally.
   }
 }
 
-function appendLiveWaveformSamples(pcm: WavPcm): void {
+function placeLivePcmChunk(pcm: WavPcm, startFrame: number): void {
+  if (!liveStream) return;
   const frames = Math.floor(pcm.samples.length / pcm.channels);
   if (frames <= 0) return;
-  const mono = new Float32Array(frames);
+  const incoming = new Float32Array(frames * pcm.channels);
   for (let frame = 0; frame < frames; frame++) {
-    mono[frame] = pcm.samples[frame * pcm.channels] / 32768;
+    for (let channel = 0; channel < pcm.channels; channel++) {
+      incoming[frame * pcm.channels + channel] = pcm.samples[frame * pcm.channels + channel] / 32768;
+    }
   }
-  if (!waveformSamples || waveformSamples.length === 0) {
-    waveformSamples = mono;
-  } else {
-    const combined = new Float32Array(waveformSamples.length + mono.length);
-    combined.set(waveformSamples, 0);
-    combined.set(mono, waveformSamples.length);
-    waveformSamples = combined;
+
+  const fadeFrames = Math.min(96, frames);
+  if (fadeFrames > 0) {
+    for (let channel = 0; channel < pcm.channels; channel++) {
+      const previous = startFrame > 0 && (startFrame - 1) < liveStream.receivedFrames
+        ? liveStream.pcm[(startFrame - 1) * pcm.channels + channel] || 0
+        : 0;
+      for (let frame = 0; frame < fadeFrames; frame++) {
+        const index = frame * pcm.channels + channel;
+        const target = incoming[index];
+        const weight = (frame + 1) / fadeFrames;
+        incoming[index] = previous + (target - previous) * weight;
+      }
+    }
   }
+
+  const neededSamples = (startFrame + frames) * pcm.channels;
+  if (liveStream.pcm.length < neededSamples) {
+    const next = new Float32Array(Math.max(neededSamples, Math.ceil(liveStream.pcm.length * 1.5) + 48000));
+    next.set(liveStream.pcm);
+    liveStream.pcm = next;
+  }
+  liveStream.pcm.set(incoming, startFrame * pcm.channels);
+  liveStream.receivedFrames = Math.max(liveStream.receivedFrames, startFrame + frames);
+  refreshLiveWaveformFromBuffer();
+}
+
+function refreshLiveWaveformFromBuffer(): void {
+  if (!liveStream || !liveStream.channels || liveStream.receivedFrames <= 0) {
+    waveformSamples = new Float32Array(0);
+    return;
+  }
+  const mono = new Float32Array(liveStream.receivedFrames);
+  for (let frame = 0; frame < liveStream.receivedFrames; frame++) {
+    mono[frame] = liveStream.pcm[frame * liveStream.channels] || 0;
+  }
+  waveformSamples = mono;
 }
 
 function liveStreamDuration(): number {
@@ -4392,23 +4442,39 @@ function liveStreamDuration(): number {
 }
 
 function liveStreamCurrentTime(): number {
-  if (!liveStream || !liveStream.started) return 0;
-  const elapsed = Math.max(0, liveStream.context.currentTime - liveStream.firstStartTime);
-  return Math.min(elapsed, Math.max(liveStreamDuration(), liveStream.finalDuration));
+  if (!liveStream || !liveStream.sampleRate) return 0;
+  return Math.min(liveStream.playbackFrame / liveStream.sampleRate, liveStreamFinalDuration());
+}
+
+function liveStreamFinalDuration(): number {
+  if (!liveStream) return 0;
+  return Math.max(liveStreamDuration(), liveStream.finalDuration);
+}
+
+function seekLiveStream(timeSeconds: number): void {
+  if (!liveStream || !liveStream.sampleRate) return;
+  const maxTime = liveStreamFinalDuration();
+  const clamped = Math.max(0, Math.min(timeSeconds, maxTime));
+  liveStream.playbackFrame = clamped * liveStream.sampleRate;
+  updateOutputTimeLabel();
+  drawWaveform();
 }
 
 function updateOutputTimeLabel(): void {
   if (liveStream) {
-    setText("#output-time", `${formatTime(liveStreamCurrentTime())} / ${formatTime(Math.max(liveStreamDuration(), liveStream.finalDuration))}`);
+    setText("#output-time", `${formatTime(liveStreamCurrentTime())} / ${formatTime(liveStreamFinalDuration())}`);
     return;
   }
   setText("#output-time", `${formatTime(audioPlayer.currentTime)} / ${formatTime(audioPlayer.duration || 0)}`);
 }
 
-function completeLiveStreamToFinalPlayer(): void {
-  if (!liveStream || !liveStream.finalObjectUrl || liveStream.sources.length > 0) return;
+function completeLiveStreamToFinalPlayer(resumePlayback: boolean): void {
+  if (!liveStream || !liveStream.finalObjectUrl) return;
   const finalUrl = liveStream.finalObjectUrl;
+  const currentTime = liveStreamCurrentTime();
   liveStream.finalObjectUrl = null;
+  liveStream.processor.onaudioprocess = null;
+  try { liveStream.processor.disconnect(); } catch { /* already disconnected */ }
   void liveStream.context.close().catch(() => {});
   liveStream = null;
   el<HTMLElement>("#output-section").classList.remove("streaming");
@@ -4420,14 +4486,20 @@ function completeLiveStreamToFinalPlayer(): void {
   el<HTMLButtonElement>("#play-btn").textContent = "▶";
   audioPlayer.onloadedmetadata = () => {
     if (audioPlayer.duration > 0) {
-      audioPlayer.currentTime = audioPlayer.duration;
+      audioPlayer.currentTime = Math.min(currentTime, audioPlayer.duration);
     } else if (finalDuration > 0) {
-      audioPlayer.currentTime = finalDuration;
+      audioPlayer.currentTime = Math.min(currentTime, finalDuration);
+    }
+    if (resumePlayback && audioPlayer.currentTime < (audioPlayer.duration || finalDuration) - 0.05) {
+      void audioPlayer.play().then(() => {
+        el<HTMLButtonElement>("#play-btn").textContent = "⏸";
+        startWaveLoop();
+      }).catch(() => {});
     }
     updateOutputTimeLabel();
     drawWaveform();
   };
-  setText("#output-time", `${formatTime(finalDuration)} / ${formatTime(finalDuration)}`);
+  setText("#output-time", `${formatTime(Math.min(currentTime, finalDuration))} / ${formatTime(finalDuration)}`);
   drawWaveform();
 }
 
@@ -4454,8 +4526,8 @@ function finalizeLiveStreamOutput(result: GenerationResult, mode: Mode, token: n
     if (liveStream) {
       if (liveStream.finalObjectUrl) URL.revokeObjectURL(liveStream.finalObjectUrl);
       liveStream.finalObjectUrl = url;
-      if (liveStream.finalized && liveStream.sources.length === 0) {
-        completeLiveStreamToFinalPlayer();
+      if (liveStream.finalized && !liveStream.playing) {
+        completeLiveStreamToFinalPlayer(false);
       }
     } else {
       if (outputObjectUrl) URL.revokeObjectURL(outputObjectUrl);
@@ -4526,7 +4598,7 @@ function startWaveLoop(): void {
     updateOutputTimeLabel();
     drawWaveform();
     if (liveStream) {
-      if (liveStream.context.state === "running" && (liveStream.sources.length > 0 || !liveStream.finalized)) {
+      if (liveStream.playing || !liveStream.finalized) {
         waveRAF = requestAnimationFrame(tick);
       } else {
         waveRAF = null;
@@ -4594,7 +4666,7 @@ function drawWaveform(): void {
   const mid = height / 2;
 
   const currentTime = liveStream ? liveStreamCurrentTime() : audioPlayer.currentTime;
-  const duration = liveStream ? Math.max(liveStreamDuration(), liveStream.finalDuration) : audioPlayer.duration;
+  const duration = liveStream ? liveStreamFinalDuration() : audioPlayer.duration;
   const progress = duration > 0 ? currentTime / duration : 0;
   const playheadX = progress * width;
 
@@ -4638,14 +4710,20 @@ function initAudioPlayer(): void {
 
   playBtn.addEventListener("click", async () => {
     if (liveStream) {
-      if (liveStream.context.state === "running") {
-        await liveStream.context.suspend().catch(() => {});
+      if (liveStream.playing) {
+        liveStream.playing = false;
         playBtn.textContent = "▶";
         if (waveRAF) { cancelAnimationFrame(waveRAF); waveRAF = null; }
         updateOutputTimeLabel();
         drawWaveform();
-      } else if (liveStream.context.state === "suspended") {
+        if (liveStream.finalized && liveStream.finalObjectUrl) completeLiveStreamToFinalPlayer(false);
+      } else {
+        if (liveStream.finalized && liveStream.finalObjectUrl) {
+          completeLiveStreamToFinalPlayer(true);
+          return;
+        }
         await liveStream.context.resume().catch(() => {});
+        liveStream.playing = true;
         playBtn.textContent = "⏸";
         startWaveLoop();
       }
@@ -4666,17 +4744,37 @@ function initAudioPlayer(): void {
     }
   });
 
-  // Click-to-seek on waveform
+  // Click/drag-to-seek on waveform, including while streaming.
   const canvas = el<HTMLCanvasElement>("#waveform-canvas");
   canvas.style.cursor = "pointer";
-  canvas.addEventListener("click", (e) => {
-    if (liveStream) return;
-    if (!audioPlayer.duration) return;
+  const seekFromPointer = (e: PointerEvent | MouseEvent) => {
     const rect = canvas.getBoundingClientRect();
     const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    if (liveStream) {
+      seekLiveStream(pct * liveStreamFinalDuration());
+      if (liveStream.playing) startWaveLoop();
+      return;
+    }
+    if (!audioPlayer.duration) return;
     audioPlayer.currentTime = pct * audioPlayer.duration;
     drawWaveform();
     if (!audioPlayer.paused) startWaveLoop();
+  };
+  let outputWaveDragging = false;
+  canvas.addEventListener("pointerdown", (e) => {
+    outputWaveDragging = true;
+    canvas.setPointerCapture(e.pointerId);
+    seekFromPointer(e);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (outputWaveDragging) seekFromPointer(e);
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    outputWaveDragging = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  });
+  canvas.addEventListener("pointercancel", () => {
+    outputWaveDragging = false;
   });
 
   setSaveFormat(selectedSaveFormat);

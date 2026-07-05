@@ -4,14 +4,14 @@
 
 作者: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.0` 是一个使用 Rust/Tauri 构建的 Windows 桌面
+Higgs Audio v3 Studio `0.2.1` 是一个使用 Rust/Tauri 构建的 Windows 桌面
 应用，用来通过移植后的原生 C++/CUDA 引擎在本机运行 Higgs Audio v3 TTS
 推理。应用不会通过 Python 环境或 CLI sidecar 绕一圈，而是由 Tauri 前端
 调用 Rust 命令，Rust 再通过 `libloading` 加载 `audiocpp_engine.dll`，最后
 进入原生推理路径。
 
 这个项目的目标是提供一个实用的本地语音生成工作流：普通 TTS、声音克隆、
-继续说话、多说话人生成、生成时实时流式播放、本地 API 流式响应、Whisper
+继续说话、多说话人生成、带去爆音处理和波形拖动定位的实时流式播放、本地 API 流式响应、Whisper
 自动转写、WAV/MP3 导出、说话人缓存复用，以及 GPU/VRAM 监控。
 
 ## 下载
@@ -162,7 +162,7 @@ Authorization: Bearer <your-api-key>
 | `GET /v1/status` | 引擎、模型、队列和流式支持状态。 |
 | `GET /v1/models` | 应用检测到的本地 Higgs 模型文件夹。 |
 | `GET /v1/higgs/speakers` | 已保存的说话人身份，可用作 `speaker:<id>`。 |
-| `POST /v1/audio/speech` | OpenAI 风格的普通 TTS 或保存说话人克隆，返回 WAV。 |
+| `POST /v1/audio/speech` | OpenAI 风格的普通 TTS 或保存说话人克隆，返回 WAV 或 MP3。 |
 | `POST /v1/higgs/voice-clone` | 使用本地参考音频路径进行声音克隆。 |
 | `POST /v1/higgs/continue-speech` | 继续一段本地音频。 |
 | `POST /v1/higgs/audio/stream` | 以 NDJSON 事件流返回进度和 wav-base64 音频块。 |
@@ -172,6 +172,31 @@ Authorization: Bearer <your-api-key>
 `final`、`done` 或 `error` 事件。API 页的 Command Centre 可以弹出为独立
 窗口，并按 info、warning、error、request、job 过滤日志；主窗口最小化到系统
 托盘时，弹出的日志窗口不会跟着隐藏。
+
+普通完成文件接口支持 `response_format: "wav"` 或 `"mp3"`，会直接返回
+`audio/wav` 或 `audio/mpeg`。流式接口目前仍返回 WAV 分块。
+
+脚本播放流式音频时，逐行读取 HTTP 响应。`event` 为 `audio` 时，把
+`wavBase64` 解码成 WAV 字节并送入自己的播放器或音频队列；`event` 为
+`final` 时，把 `wavBase64` 保存为干净的最终 WAV 文件。
+
+```python
+import base64
+import json
+import requests
+
+with requests.post(url, headers=headers, json=payload, stream=True, timeout=600) as r:
+    r.raise_for_status()
+    for line in r.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        event = json.loads(line)
+        if event["event"] == "audio":
+            wav_chunk = base64.b64decode(event["wavBase64"])
+            # 在这里把 wav_chunk 放进你的播放队列。
+        elif event["event"] == "final":
+            open("final.wav", "wb").write(base64.b64decode(event["wavBase64"]))
+```
 
 ## 系统要求
 
@@ -234,6 +259,14 @@ models/higgs-q8_0/q8_0.gguf
 
 在左侧 Whisper 面板选择并下载一个 `ggml-*.bin` 模型。推荐默认模型是
 `base.en-q8_0`，`base.en` 也会在下拉框中标星。
+
+### 生成时显存突然接近满载
+
+短时间显存尖峰通常来自 CUDA/ggml 的临时 workspace、scratch buffer、KV cache、
+音频 codec 阶段或 graph/session 初始化。即使使用低 token 数，也可能先分配按
+当前会话或最坏路径估算的大块工作区，所以资源监控里会看到接近满显存的瞬时占用。
+这不一定表示模型权重本身需要那么多显存；高 token 数更多影响生成持续时间和 KV
+cache 增长。
 
 ## 负责任使用
 

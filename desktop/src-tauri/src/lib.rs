@@ -1087,6 +1087,31 @@ fn json_error(
     )
 }
 
+fn api_response_format(body: &serde_json::Value) -> Result<&'static str, String> {
+    let format = body
+        .get("response_format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("wav")
+        .trim()
+        .to_ascii_lowercase();
+    match format.as_str() {
+        "wav" => Ok("wav"),
+        "mp3" => Ok("mp3"),
+        _ => Err("response_format must be wav or mp3".to_string()),
+    }
+}
+
+fn encode_api_audio_response(
+    audio: &AudioResult,
+    format: &str,
+) -> Result<(&'static str, Vec<u8>), String> {
+    match format {
+        "wav" => Ok(("audio/wav", audio.encode_pcm16_wav())),
+        "mp3" => audio.encode_mp3().map(|bytes| ("audio/mpeg", bytes)),
+        _ => Err("response_format must be wav or mp3".to_string()),
+    }
+}
+
 fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -1886,17 +1911,10 @@ fn handle_api_request(
             if text.is_empty() {
                 return json_error(400, "missing_input", "input is required");
             }
-            let format = body
-                .get("response_format")
-                .and_then(|v| v.as_str())
-                .unwrap_or("wav");
-            if format != "wav" {
-                return json_error(
-                    501,
-                    "format_not_supported",
-                    "API currently returns wav; desktop save supports mp3",
-                );
-            }
+            let format = match api_response_format(&body) {
+                Ok(format) => format,
+                Err(e) => return json_error(400, "format_not_supported", e),
+            };
             let voice = body
                 .get("voice")
                 .and_then(|v| v.as_str())
@@ -2008,12 +2026,15 @@ fn handle_api_request(
                             Some(1),
                             "Complete",
                         );
-                        (
-                            200,
-                            "audio/wav",
-                            audio.encode_pcm16_wav(),
-                            format!("speech generated with speaker {}", speaker.name),
-                        )
+                        match encode_api_audio_response(&audio, format) {
+                            Ok((content_type, bytes)) => (
+                                200,
+                                content_type,
+                                bytes,
+                                format!("speech generated with speaker {}", speaker.name),
+                            ),
+                            Err(e) => json_error(500, "audio_encode_failed", e),
+                        }
                     }
                     Err(e) => {
                         let message = map_engine_err(&e);
@@ -2103,12 +2124,15 @@ fn handle_api_request(
                         Some(1),
                         "Complete",
                     );
-                    (
-                        200,
-                        "audio/wav",
-                        audio.encode_pcm16_wav(),
-                        "speech generated".to_string(),
-                    )
+                    match encode_api_audio_response(&audio, format) {
+                        Ok((content_type, bytes)) => (
+                            200,
+                            content_type,
+                            bytes,
+                            "speech generated".to_string(),
+                        ),
+                        Err(e) => json_error(500, "audio_encode_failed", e),
+                    }
                 }
                 Err(e) => {
                     let message = map_engine_err(&e);
@@ -2155,17 +2179,10 @@ fn handle_api_request(
                     "input and reference_audio_path are required",
                 );
             }
-            let format = body
-                .get("response_format")
-                .and_then(|v| v.as_str())
-                .unwrap_or("wav");
-            if format != "wav" {
-                return json_error(
-                    501,
-                    "format_not_supported",
-                    "API currently returns wav; desktop save supports mp3",
-                );
-            }
+            let format = match api_response_format(&body) {
+                Ok(format) => format,
+                Err(e) => return json_error(400, "format_not_supported", e),
+            };
             let ref_text = body.get("reference_text").and_then(|v| v.as_str());
             let api_options = api_stream_options(api_generation_options(&body));
             let ref_wav = match prepare_reference_audio(&ref_path, &api_options) {
@@ -2243,12 +2260,15 @@ fn handle_api_request(
                         Some(1),
                         "Complete",
                     );
-                    (
-                        200,
-                        "audio/wav",
-                        audio.encode_pcm16_wav(),
-                        "voice clone generated".to_string(),
-                    )
+                    match encode_api_audio_response(&audio, format) {
+                        Ok((content_type, bytes)) => (
+                            200,
+                            content_type,
+                            bytes,
+                            "voice clone generated".to_string(),
+                        ),
+                        Err(e) => json_error(500, "audio_encode_failed", e),
+                    }
                 }
                 Err(e) => {
                     let message = map_engine_err(&e);
@@ -2285,6 +2305,10 @@ fn handle_api_request(
             if audio_path.is_empty() {
                 return json_error(400, "missing_audio_path", "audio_path is required");
             }
+            let format = match api_response_format(&body) {
+                Ok(format) => format,
+                Err(e) => return json_error(400, "format_not_supported", e),
+            };
             let continuation = body.get("continuation_text").and_then(|v| v.as_str());
             let api_options = api_stream_options(api_generation_options(&body));
             let audio_wav = match prepare_reference_audio(&audio_path, &api_options) {
@@ -2361,12 +2385,15 @@ fn handle_api_request(
                         Some(1),
                         "Complete",
                     );
-                    (
-                        200,
-                        "audio/wav",
-                        audio.encode_pcm16_wav(),
-                        "continuation generated".to_string(),
-                    )
+                    match encode_api_audio_response(&audio, format) {
+                        Ok((content_type, bytes)) => (
+                            200,
+                            content_type,
+                            bytes,
+                            "continuation generated".to_string(),
+                        ),
+                        Err(e) => json_error(500, "audio_encode_failed", e),
+                    }
                 }
                 Err(e) => {
                     let message = map_engine_err(&e);

@@ -1330,12 +1330,13 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "higgs-audio-studio"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "libloading 0.8.9",
  "nvml-wrapper",
  "serde",
  "serde_json",
+ "shine-rs",
  "symphonia",
  "sysinfo",
  "tauri",
@@ -1346,6 +1347,12 @@ dependencies = [
  "windows-sys 0.59.0",
  "zip",
 ]
+
+[[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "html5ever"
@@ -2981,6 +2988,18 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shine-rs"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6135aba5a2334627cc67e726d20cd42d4218654b11d1467aeac83d977bfc70c1"
+dependencies = [
+ "hound",
+ "lazy_static",
+ "log",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.0` is a Windows desktop app built with Rust/Tauri for
+Higgs Audio v3 Studio `0.2.1` is a Windows desktop app built with Rust/Tauri for
 local Higgs Audio v3 TTS inference through a ported native C++/CUDA engine. The
 app does not shell out to a CLI sidecar: the Tauri UI calls Rust commands, Rust
 loads `audiocpp_engine.dll` with `libloading`, and the DLL executes the native
@@ -88,14 +88,14 @@ Hugging Face repo root so the runtime links resolve under `/resolve/main/...`.
 - Runs the ported Higgs Audio v3 C++/CUDA engine inside a Tauri desktop app.
 - Supports normal TTS, voice cloning, speech continuation, and multi-speaker workflows.
 - Supports reference voice drag/drop, replacement, waveform previews, and remove buttons.
-- Supports optional live streaming playback during generation, with the output waveform filling as chunks arrive and play/pause control for the live stream.
+- Supports optional live streaming playback during generation, with de-clicked chunk edges, waveform scrubbing, and play/pause control for the live stream.
 - Supports optional Whisper auto-transcription for reference transcripts.
 - Includes a Whisper model selector with direct `whisper.cpp` model downloads.
 - Includes a Speaker Gallery for reusable speaker identities with reference audio, transcript, notes, display image, normalization, and selected-speaker ZIP import/export.
 - Reuses saved speaker reference caches (`.hspkcache`) after first inference to skip repeated reference-code preparation.
 - Includes per-line speaker assignment, draggable line ordering, and speaker-line pauses.
 - Includes a visible generation queue manager for queued UI jobs, with active-job status, edit, delete, and clear controls.
-- Includes a local API with normal WAV responses, NDJSON streaming responses, saved-speaker discovery, and a detachable Command Centre log window.
+- Includes a local API with normal WAV/MP3 responses, NDJSON streaming responses, saved-speaker discovery, and a detachable Command Centre log window.
 - Exposes generation controls such as temperature, top-k, top-p, seed mode, max tokens, chunking, emotion, style, speed, pitch, and expressiveness.
 - Exports generated audio as WAV or MP3.
 - Tracks recent generations per mode.
@@ -262,16 +262,44 @@ Useful routes:
 | `GET /v1/status` | Engine, model, queue, and streaming support state. |
 | `GET /v1/models` | Local Higgs model folders detected by the app. |
 | `GET /v1/higgs/speakers` | Saved speaker identities, including `speaker:<id>` voice names and cache status. |
-| `POST /v1/audio/speech` | OpenAI-style plain TTS or saved-speaker voice clone, returned as WAV. |
+| `POST /v1/audio/speech` | OpenAI-style plain TTS or saved-speaker voice clone, returned as WAV or MP3. |
 | `POST /v1/higgs/voice-clone` | Voice clone from a local reference audio path. |
 | `POST /v1/higgs/continue-speech` | Continue an existing local audio file. |
 | `POST /v1/higgs/audio/stream` | Streaming TTS/clone/continue response as newline-delimited JSON events. |
 | `POST /v1/higgs/cancel` | Cancel the active generation. |
 
+Finished-file routes accept `response_format: "wav"` or `response_format: "mp3"` and return `audio/wav` or `audio/mpeg` directly.
+
 `/v1/higgs/audio/stream` emits NDJSON events such as `queued`, `start`,
 `progress`, `audio`, `final`, `done`, and `error`. Audio chunks are delivered as
 `wavBase64` fields so simple clients can parse progress and audio from one
 response stream.
+
+For script playback, read the HTTP response line-by-line. When `event` is
+`audio`, base64-decode `wavBase64` and feed those WAV bytes to your player or
+audio queue. When `event` is `final`, base64-decode that `wavBase64` as the
+clean finished WAV file for saving or replacing the preview. The stream endpoint
+currently uses WAV chunks only; use the finished-file routes when you want MP3.
+
+Minimal Python stream reader:
+
+```python
+import base64
+import json
+import requests
+
+with requests.post(url, headers=headers, json=payload, stream=True, timeout=600) as r:
+    r.raise_for_status()
+    for line in r.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+        event = json.loads(line)
+        if event["event"] == "audio":
+            wav_chunk = base64.b64decode(event["wavBase64"])
+            # Push wav_chunk to your audio playback queue here.
+        elif event["event"] == "final":
+            open("final.wav", "wb").write(base64.b64decode(event["wavBase64"]))
+```
 
 The API tab includes examples for curl, Python, JavaScript, and PowerShell. Its
 Command Centre can be popped out into a separate window with filters for info,
@@ -562,6 +590,14 @@ Short VRAM spikes can happen during inference. They usually come from temporary
 workspace buffers, KV cache growth, CUDA/ggml scratch allocations, audio codec
 stages, or graph execution setup. A quantized model can still need extra transient
 memory while generating.
+
+Seeing the card jump close to full VRAM for a moment does not always mean the
+model weights themselves need that much memory. CUDA/ggml can reserve large
+workspace and scratch regions sized for the current graph/session, and Windows
+or NVML may report that reserved memory as used. Low token counts can still show
+the same reservation spike because the scratch workspace is often allocated up
+front; higher token counts mostly affect how long the generation runs and how
+much KV cache grows.
 
 If you run out of memory:
 

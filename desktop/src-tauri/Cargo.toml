@@ -1,6 +1,6 @@
 [package]
 name = "higgs-audio-studio"
-version = "0.2.0"
+version = "0.2.1"
 description = "Tauri shell for the ported Higgs Audio v3 C++ engine"
 authors = ["Higgs Audio v3 Studio"]
 edition = "2021"
@@ -17,6 +17,7 @@ libloading = "0.8"
 nvml-wrapper = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+shine-rs = "0.1.3"
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "aac", "isomp4"] }
 sysinfo = "0.32"
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }

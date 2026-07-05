@@ -125,7 +125,7 @@
 
           <footer class="sidebar-footer">
             <button id="github-link" class="footer-link" type="button">★ Saganaki22/Higgs-Audio-v3-Studio</button>
-            <button id="version-link" class="footer-link version-link" type="button">v0.2.0</button>
+            <button id="version-link" class="footer-link version-link" type="button">v0.2.1</button>
           </footer>
         </aside>
 
@@ -562,8 +562,8 @@
                     <div><strong>reference_text</strong><span>Optional transcript for the reference voice.</span></div>
                     <div><strong>audio_path</strong><span>Local path to the audio file used by continue speech.</span></div>
                     <div><strong>continuation_text</strong><span>Optional text to speak after the input audio.</span></div>
-                    <div><strong>response_format</strong><span>Currently <code>wav</code> from the API.</span></div>
-                    <div><strong>stream events</strong><span><code>/higgs/audio/stream</code> returns <code>queued</code>, <code>start</code>, <code>progress</code>, <code>audio</code>, <code>final</code>, <code>done</code>, or <code>error</code> NDJSON events.</span></div>
+                    <div><strong>response_format</strong><span>Finished-file API routes accept <code>wav</code> or <code>mp3</code>. Streaming stays <code>wav</code> chunks.</span></div>
+                    <div><strong>stream events</strong><span><code>/higgs/audio/stream</code> returns <code>queued</code>, <code>start</code>, <code>progress</code>, <code>audio</code>, <code>final</code>, <code>done</code>, or <code>error</code> NDJSON events. Decode <code>audio.wavBase64</code> chunks for live playback and keep <code>final.wavBase64</code> as the clean file.</span></div>
                     <div><strong>max_tokens</strong><span>Generation length limit.</span></div>
                     <div><strong>temperature</strong><span>Randomness. Lower is steadier, higher is more varied.</span></div>
                     <div><strong>top_p</strong><span>Nucleus sampling filter.</span></div>
