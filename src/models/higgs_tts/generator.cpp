@@ -38,7 +38,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 namespace modules = engine::modules;
 
-constexpr ggml_type kDefaultDecodeKVCacheType = GGML_TYPE_F32;
+constexpr ggml_type kDefaultDecodeKVCacheType = GGML_TYPE_F16;
 
 struct GgmlContextDeleter {
     void operator()(ggml_context * ctx) const noexcept {
@@ -107,7 +107,7 @@ struct PromptReferenceInfo {
 struct DecodeKVCacheTypes {
     ggml_type key = kDefaultDecodeKVCacheType;
     ggml_type value = kDefaultDecodeKVCacheType;
-    std::string label = "f32";
+    std::string label = "f16";
 };
 
 int64_t head_dim(const HiggsTTSConfig & config) {
@@ -152,25 +152,17 @@ DecodeKVCacheTypes resolve_decode_kv_cache_types() {
     std::replace(mode.begin(), mode.end(), '_', '-');
 
     DecodeKVCacheTypes types;
-    if (mode.empty() || mode == "f32") {
+    if (mode.empty() || mode == "f16" || mode == "both-f16") {
         return types;
     }
-    if (mode == "f16" || mode == "both-f16") {
-        types.key = GGML_TYPE_F16;
-        types.value = GGML_TYPE_F16;
-        types.label = "f16";
-        return types;
-    }
-    if (mode == "k-f16" || mode == "key-f16") {
-        types.key = GGML_TYPE_F16;
-        types.value = GGML_TYPE_F32;
-        types.label = "k-f16-v-f32";
-        return types;
-    }
-    if (mode == "v-f16" || mode == "value-f16") {
+    if (mode == "f32") {
         types.key = GGML_TYPE_F32;
-        types.value = GGML_TYPE_F16;
-        types.label = "k-f32-v-f16";
+        types.value = GGML_TYPE_F32;
+        types.label = "f32";
+        return types;
+    }
+    if (mode == "k-f16" || mode == "key-f16" || mode == "v-f16" || mode == "value-f16") {
+        debug::trace_log_scalar("higgs_tts.generator.decode_cache_env_unsupported_mixed", mode);
         return types;
     }
 

@@ -65,11 +65,11 @@ core::TensorValue FastKVSetRowsModule::build(
     const int64_t row_elems = cache.shape.dims[2] * cache.shape.dims[3];
     auto flat_cache = core::reshape_tensor(ctx, cache, core::TensorShape::from_dims({steps, row_elems}));
     auto contiguous_row = tensor_layout::ensure_contiguous_layout_if_needed(ctx, row);
-    if (contiguous_row.type != cache.type) {
+    if (contiguous_row.type != GGML_TYPE_F32) {
         contiguous_row = core::wrap_tensor(
-            ggml_cast(ctx.ggml, contiguous_row.tensor, cache.type),
+            ggml_cast(ctx.ggml, contiguous_row.tensor, GGML_TYPE_F32),
             contiguous_row.shape,
-            cache.type);
+            GGML_TYPE_F32);
         contiguous_row = tensor_layout::ensure_contiguous_layout_if_needed(ctx, contiguous_row);
     }
     auto flat_row = core::reshape_tensor(ctx, contiguous_row, core::TensorShape::from_dims({1, row_elems}));
