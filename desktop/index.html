@@ -125,7 +125,7 @@
 
           <footer class="sidebar-footer">
             <button id="github-link" class="footer-link" type="button">★ Saganaki22/Higgs-Audio-v3-Studio</button>
-            <button id="version-link" class="footer-link version-link" type="button">v0.2.31</button>
+            <button id="version-link" class="footer-link version-link" type="button">v0.2.40</button>
           </footer>
         </aside>
 
@@ -173,7 +173,7 @@
                    aria-label="Drop audio file or click to browse">
                 <div class="dropzone-empty">
                   <p>⤒ Drop audio file here, or click to browse</p>
-                  <p class="dropzone-hint">mp3 · wav · flac · m4a — any length</p>
+                  <p class="dropzone-hint">mp3 · wav · flac · m4a — auto-cropped to 30s</p>
                 </div>
               </div>
               <div class="ref-preview hidden" id="clone-ref-preview">
@@ -235,7 +235,7 @@
                          aria-label="Drop speaker reference audio or click to browse">
                       <div class="dropzone-empty">
                         <p>⤒ Drop reference voice here, or click to browse</p>
-                        <p class="dropzone-hint">mp3 · wav · flac · m4a</p>
+                        <p class="dropzone-hint">mp3 · wav · flac · m4a — auto-cropped to 30s</p>
                       </div>
                     </div>
                     <div class="ref-preview hidden" id="gallery-ref-preview">
@@ -458,7 +458,7 @@
               <label class="slider-label">
                 <span class="slider-name">Max tokens</span>
                 <span class="tip" tabindex="0" data-tip="Default: 1024. Caps generated token count. Higher allows longer output but reserves more runtime KV/graph memory up front.">?</span>
-                <input type="number" id="opt-max-tokens" value="1024" min="32" max="8192" step="8" class="number-input" />
+                <input type="number" id="opt-max-tokens" value="2048" min="32" max="8192" step="8" class="number-input" />
               </label>
               <label class="slider-label">
                 <span class="slider-name">Longform chunking</span>
@@ -562,8 +562,8 @@
                     <div><strong>reference_text</strong><span>Optional transcript for the reference voice.</span></div>
                     <div><strong>audio_path</strong><span>Local path to the audio file used by continue speech.</span></div>
                     <div><strong>continuation_text</strong><span>Optional text to speak after the input audio.</span></div>
-                    <div><strong>response_format</strong><span>Finished-file API routes accept <code>wav</code> or <code>mp3</code>. Streaming stays <code>wav</code> chunks.</span></div>
-                    <div><strong>stream events</strong><span><code>/higgs/audio/stream</code> returns <code>queued</code>, <code>start</code>, <code>progress</code>, <code>audio</code>, <code>final</code>, <code>done</code>, or <code>error</code> NDJSON events. Decode <code>audio.wavBase64</code> chunks for live playback and keep <code>final.wavBase64</code> as the clean file.</span></div>
+                    <div><strong>response_format</strong><span>Finished-file API routes accept <code>wav</code> or <code>mp3</code>. Streaming sends live <code>wavBase64</code> chunks and returns final <code>wavBase64</code> or <code>mp3Base64</code>.</span></div>
+                    <div><strong>stream events</strong><span><code>/higgs/audio/stream</code> returns <code>queued</code>, <code>start</code>, <code>progress</code>, <code>audio</code>, <code>final</code>, <code>done</code>, or <code>error</code> NDJSON events. Decode <code>audio.wavBase64</code> chunks for live playback, then save <code>final.wavBase64</code> or <code>final.mp3Base64</code>.</span></div>
                     <div><strong>max_tokens</strong><span>Generation length limit.</span></div>
                     <div><strong>temperature</strong><span>Randomness. Lower is steadier, higher is more varied.</span></div>
                     <div><strong>top_p</strong><span>Nucleus sampling filter.</span></div>
@@ -753,6 +753,63 @@
           <div class="modal-actions">
             <button id="speaker-export-cancel" class="compact-button" type="button">Cancel</button>
             <button id="speaker-export-confirm" class="compact-button primary" type="button">Export selected</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ═══════════ First run setup guide ═══════════ -->
+      <div id="setup-wizard-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="setup-wizard-title">
+        <section class="modal-panel setup-wizard-panel">
+          <div class="modal-head">
+            <div>
+              <h3 id="setup-wizard-title">First Run Setup</h3>
+              <span class="api-status-text">Engine, model, then generate</span>
+            </div>
+            <button id="setup-wizard-close" class="popover-close" type="button" aria-label="Close">✕</button>
+          </div>
+          <div class="setup-wizard-body">
+            <p id="setup-wizard-summary" class="input-hint">Checking local engine and model files...</p>
+            <div class="setup-check-list">
+              <div class="setup-check-row" id="setup-check-engine">
+                <span class="setup-check-icon" id="setup-engine-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>Engine DLLs</strong>
+                  <span id="setup-engine-detail">Checking engine package...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-browse-engine" class="compact-button" type="button">Browse</button>
+                  <button id="setup-wizard-download-engine" class="compact-button" type="button">Download</button>
+                  <button id="setup-wizard-load-engine" class="compact-button primary" type="button">Load</button>
+                </span>
+              </div>
+              <div class="setup-check-row" id="setup-check-model">
+                <span class="setup-check-icon" id="setup-model-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>Higgs model folder</strong>
+                  <span id="setup-model-detail">Checking downloaded model folders...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-browse-model" class="compact-button" type="button">Browse</button>
+                  <button id="setup-wizard-download-model" class="compact-button" type="button">Download</button>
+                  <button id="setup-wizard-load-model" class="compact-button primary" type="button">Load</button>
+                </span>
+              </div>
+              <div class="setup-check-row optional" id="setup-check-whisper">
+                <span class="setup-check-icon" id="setup-whisper-icon">i</span>
+                <span class="setup-check-main">
+                  <strong>Whisper auto-transcribe</strong>
+                  <span id="setup-whisper-detail">Optional. Needed only for auto reference transcripts.</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-download-whisper" class="compact-button" type="button">Download</button>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button id="setup-wizard-refresh" class="compact-button" type="button">Refresh</button>
+            <button id="setup-wizard-skip" class="compact-button" type="button">Close</button>
+            <button id="setup-wizard-continue" class="compact-button primary" type="button">Open Studio</button>
           </div>
         </section>
       </div>

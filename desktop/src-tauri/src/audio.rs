@@ -10,6 +10,13 @@ pub enum AudioError {
     Io(String),
 }
 
+#[derive(Clone, Debug)]
+pub struct PreparedAudio {
+    pub path: String,
+    pub duration_seconds: f64,
+    pub cropped: bool,
+}
+
 /// If the file is already a WAV, return the path as-is.
 /// Otherwise, decode it with symphonia and write a temp WAV, return that path.
 pub fn ensure_wav(path: &str) -> Result<String, AudioError> {
@@ -40,32 +47,89 @@ pub fn ensure_wav(path: &str) -> Result<String, AudioError> {
     Ok(temp_path.to_string_lossy().into_owned())
 }
 
-pub fn normalize_to_temp_wav(path: &str, target_peak: f32) -> Result<String, AudioError> {
+pub fn prepare_reference_wav(
+    path: &str,
+    normalize: bool,
+    target_peak: f32,
+    max_seconds: Option<f64>,
+) -> Result<PreparedAudio, AudioError> {
+    prepare_to_temp_wav(path, normalize, target_peak, max_seconds, "higgs_ref")
+}
+
+fn prepare_to_temp_wav(
+    path: &str,
+    normalize: bool,
+    target_peak: f32,
+    max_seconds: Option<f64>,
+    prefix: &str,
+) -> Result<PreparedAudio, AudioError> {
     let p = Path::new(path);
     let (samples, sample_rate, channels) = decode_any_format(path)?;
-    let peak = samples
-        .iter()
-        .fold(0.0f32, |max, value| max.max(value.abs()));
-    let target = target_peak.clamp(0.01, 1.0);
-    let gain = if peak > 0.00001 { target / peak } else { 1.0 };
-    let normalized: Vec<f32> = samples
-        .iter()
-        .map(|sample| (sample * gain).clamp(-1.0, 1.0))
-        .collect();
+    let duration_seconds = if sample_rate > 0 && channels > 0 {
+        samples.len() as f64 / (sample_rate as f64 * channels as f64)
+    } else {
+        0.0
+    };
+    let max_samples = max_seconds
+        .filter(|seconds| *seconds > 0.0)
+        .map(|seconds| {
+            (seconds * sample_rate.max(1) as f64 * channels.max(1) as f64)
+                .round()
+                .max(1.0) as usize
+        });
+    let cropped = max_samples
+        .map(|limit| samples.len() > limit)
+        .unwrap_or(false);
+    let mut processed: Vec<f32> = if let Some(limit) = max_samples {
+        samples.iter().copied().take(limit).collect()
+    } else {
+        samples
+    };
+
+    if normalize {
+        let peak = processed
+            .iter()
+            .fold(0.0f32, |max, value| max.max(value.abs()));
+        let target = target_peak.clamp(0.01, 1.0);
+        let gain = if peak > 0.00001 { target / peak } else { 1.0 };
+        for sample in &mut processed {
+            *sample = (*sample * gain).clamp(-1.0, 1.0);
+        }
+    }
+
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if ext == "wav" && !normalize && !cropped {
+        return Ok(PreparedAudio {
+            path: path.to_string(),
+            duration_seconds,
+            cropped: false,
+        });
+    }
+
     let temp_dir = std::env::temp_dir();
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
     let temp_name = format!(
-        "higgs_norm_{}_{}.wav",
+        "{}_{}_{}.wav",
+        prefix,
         p.file_stem().and_then(|s| s.to_str()).unwrap_or("audio"),
         stamp
     );
     let temp_path = temp_dir.join(temp_name);
-    let wav_bytes = encode_pcm16_wav(&normalized, sample_rate, channels);
+    let wav_bytes = encode_pcm16_wav(&processed, sample_rate, channels);
     std::fs::write(&temp_path, &wav_bytes).map_err(|e| AudioError::Io(e.to_string()))?;
-    Ok(temp_path.to_string_lossy().into_owned())
+
+    Ok(PreparedAudio {
+        path: temp_path.to_string_lossy().into_owned(),
+        duration_seconds,
+        cropped,
+    })
 }
 
 pub fn waveform_peaks(path: &str, points: usize) -> Result<Vec<f32>, AudioError> {

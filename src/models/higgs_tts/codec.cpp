@@ -1886,8 +1886,8 @@ public:
         ggml_set_output(output_);
         graph_ = ggml_new_graph_custom(ctx_.get(), 131072, false);
         ggml_build_forward_expand(graph_, output_);
-        buffer_ = ggml_backend_alloc_ctx_tensors(ctx_.get(), backend_);
-        if (buffer_ == nullptr) {
+        gallocr_ = ggml_gallocr_new(ggml_backend_get_default_buffer_type(backend_));
+        if (gallocr_ == nullptr || !ggml_gallocr_alloc_graph(gallocr_, graph_)) {
             throw std::runtime_error("failed to allocate Higgs TTS codec graph");
         }
         code_input_host_.resize(static_cast<size_t>(codebooks_));
@@ -1901,8 +1901,8 @@ public:
 
     ~DecoderGraph() {
         engine::core::release_backend_graph_resources(backend_, graph_);
-        if (buffer_ != nullptr) {
-            ggml_backend_buffer_free(buffer_);
+        if (gallocr_ != nullptr) {
+            ggml_gallocr_free(gallocr_);
         }
     }
 
@@ -1960,7 +1960,7 @@ private:
     std::vector<std::vector<int32_t>> code_input_host_;
     ggml_tensor * output_ = nullptr;
     ggml_cgraph * graph_ = nullptr;
-    ggml_backend_buffer_t buffer_ = nullptr;
+    ggml_gallocr_t gallocr_ = nullptr;
 };
 
 class HiggsAudioCodecWeightsRuntime {

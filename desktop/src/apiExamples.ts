@@ -95,14 +95,14 @@ continued.raise_for_status()
 open("continued.wav", "wb").write(continued.content)
 
 # Streaming TTS. Each response line is one JSON event. Audio events carry wavBase64 chunks;
-# decode/play those chunks as they arrive, then keep the final wavBase64 event as the clean file.
+# decode/play chunks as they arrive. The final event can be wavBase64 or mp3Base64.
 with requests.post(
     f"{BASE_URL}/higgs/audio/stream",
     headers=HEADERS,
     json={
-        "input": "This starts returning audio chunks before the final WAV is ready.",
+        "input": "This starts returning audio chunks before the final file is ready.",
         "voice": "default",
-        "response_format": "wav",
+        "response_format": "mp3",
         "max_tokens": 1024,
     },
     stream=True,
@@ -206,7 +206,7 @@ const streamed = await fetch(\`\${BASE_URL}/higgs/audio/stream\`, {
   body: JSON.stringify({
     input: "This streams progress and wav-base64 chunks.",
     voice: "default",
-    response_format: "wav",
+    response_format: "mp3",
     max_tokens: 1024,
   }),
 });
@@ -224,7 +224,7 @@ while (true) {
     if (!line.trim()) continue;
     const event = JSON.parse(line);
     // event.event === "audio" has wavBase64 for live playback.
-    // event.event === "final" has wavBase64 for the finished clean file.
+    // event.event === "final" has wavBase64 or mp3Base64 for the finished clean file.
     console.log(event.event, event.phase || event.sampleCount || "");
   }
 }
@@ -291,11 +291,11 @@ $ContinueBody = @{
 Invoke-WebRequest -Uri "$BaseUrl/higgs/continue-speech" -Method Post -Headers $Headers -Body $ContinueBody -OutFile "continued.wav"
 
 # Streaming TTS. Each line is a JSON event. Audio events include wavBase64 chunks for playback;
-# final includes the clean finished wavBase64 file.
+# final includes wavBase64 or mp3Base64 for the clean finished file.
 $StreamBody = @{
   input = "This streams progress and wav-base64 chunks."
   voice = "default"
-  response_format = "wav"
+  response_format = "mp3"
   max_tokens = 1024
 } | ConvertTo-Json
 curl.exe -N -X POST "$BaseUrl/higgs/audio/stream" \`
@@ -348,11 +348,11 @@ curl -X POST "${base}/higgs/continue-speech" \\
   --output continued.wav
 
 # Streaming TTS as newline-delimited JSON events. Audio events include wavBase64 chunks
-# for live playback; final includes the clean finished wavBase64 file.
+# for live playback; final includes wavBase64 or mp3Base64 for the clean finished file.
 curl -N -X POST "${base}/higgs/audio/stream" \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"input":"This streams progress and wav-base64 chunks.","voice":"default","response_format":"wav","max_tokens":1024}'
+  -d '{"input":"This streams progress and wav-base64 chunks.","voice":"default","response_format":"mp3","max_tokens":1024}'
 
 # Cancel the active job if needed.
 curl -X POST "${base}/higgs/cancel" \\

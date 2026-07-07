@@ -1,6 +1,6 @@
 {
   "name": "higgs-audio-studio",
-  "version": "0.2.31",
+  "version": "0.2.40",
   "private": true,
   "type": "module",
   "scripts": {

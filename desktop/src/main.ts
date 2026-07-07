@@ -1,6 +1,7 @@
 import "./styles.css";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
@@ -10,10 +11,14 @@ import {
   CUDA_DOWNLOAD_URL,
   ENGINE_PACKAGE_URL,
   ENGINE_LIB_WORD,
+  ENGINE_PATH_STORAGE_KEY,
+  FIRST_RUN_WIZARD_STORAGE_KEY,
   IS_WINDOWS,
   GITHUB_URL,
+  HIGGS_MODEL_ASSET_FILES,
   HIGGS_MODEL_PRESETS,
   HIGGS_MODEL_RESOLVE_BASE,
+  HIGGS_REFERENCE_MAX_SECONDS,
   HIGGS_RECOMMENDED_MODEL,
   MINIMIZE_TO_TRAY_STORAGE_KEY,
   NVIDIA_DRIVER_URL,
@@ -119,7 +124,21 @@ let generationProgressPrefix = "Elapsed";
 let activeDownloadKind: DownloadKind = "model";
 let downloadActive = false;
 let downloadPaused = false;
+let activeDownloadFileLabel = "";
 const apiLogs: ApiLogEntry[] = [];
+let engineDiagnosticVisible = false;
+let setupWizardOpen = false;
+type DropzoneHandler = {
+  selector: string;
+  onFile: (path: string, name: string) => void | Promise<void>;
+};
+const dropzoneHandlers: DropzoneHandler[] = [];
+type PreparedReferenceUpload = {
+  path: string;
+  fileName: string;
+  durationSeconds: number;
+  cropped: boolean;
+};
 let apiRunning = false;
 let selectedApiExample: ApiExampleKind = "curl";
 let liveStream: LiveStreamState | null = null;
@@ -266,6 +285,8 @@ function engineDiagnosticText(diagnostic: EngineDependencyDiagnostic): string {
 
 function showEngineDiagnosticModal(diagnostic: EngineDependencyDiagnostic): void {
   lastEngineDiagnostic = diagnostic;
+  hideSetupWizard();
+  engineDiagnosticVisible = true;
   const modal = el<HTMLDivElement>("#engine-diagnostic-modal");
   const missingCount = diagnostic.missing.length;
   setText(
@@ -293,7 +314,10 @@ async function diagnoseEngineForPath(libraryPath?: string): Promise<EngineDepend
 
 function initEngineDiagnosticModal(): void {
   const modal = el<HTMLDivElement>("#engine-diagnostic-modal");
-  const close = () => modal.classList.add("hidden");
+  const close = () => {
+    modal.classList.add("hidden");
+    engineDiagnosticVisible = false;
+  };
   el("#engine-diagnostic-close").addEventListener("click", close);
   modal.addEventListener("click", (event) => {
     if (event.target === modal) close();
@@ -305,6 +329,177 @@ function initEngineDiagnosticModal(): void {
   el("#engine-diagnostic-driver").addEventListener("click", () => openExternalUrl(NVIDIA_DRIVER_URL));
   el("#engine-diagnostic-cuda").addEventListener("click", () => openExternalUrl(CUDA_DOWNLOAD_URL));
   el("#engine-diagnostic-vc").addEventListener("click", () => openExternalUrl(VC_REDIST_X64_URL));
+}
+
+function hideSetupWizard(persist = false): void {
+  const modal = document.querySelector<HTMLDivElement>("#setup-wizard-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  setupWizardOpen = false;
+  if (persist) localStorage.setItem(FIRST_RUN_WIZARD_STORAGE_KEY, "true");
+}
+
+function setSetupCheck(
+  rowId: string,
+  iconId: string,
+  detailId: string,
+  state: "ready" | "missing" | "optional",
+  icon: string,
+  detail: string,
+): void {
+  const row = el<HTMLElement>(rowId);
+  row.classList.toggle("ready", state === "ready");
+  row.classList.toggle("missing", state === "missing");
+  row.classList.toggle("optional", state === "optional");
+  setText(iconId, icon);
+  setText(detailId, detail);
+}
+
+async function refreshSetupWizardState(): Promise<void> {
+  let engineStatus: ModelStatusEvent | null = null;
+  try {
+    engineStatus = await invoke<ModelStatusEvent>("engine_status");
+  } catch {
+    engineStatus = null;
+  }
+
+  const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+  const bundledEnginePath = await invoke<string | null>("bundled_engine_path").catch(() => null);
+  let enginePath = savedEnginePath || bundledEnginePath || "";
+  let engineReady = Boolean(engineStatus?.engineLoaded);
+  let enginePathValid = Boolean(engineStatus?.engineLoaded);
+  let engineDetail = engineStatus?.engineLoaded
+    ? "Loaded and ready"
+    : enginePath
+      ? `Found: ${enginePath}`
+      : "Not found. Download the engine package or browse to audiocpp_engine.dll.";
+  if (!engineReady && enginePath) {
+    let diagnostic = await diagnoseEngineForPath(enginePath);
+    if (!diagnostic && savedEnginePath && bundledEnginePath) {
+      localStorage.removeItem(ENGINE_PATH_STORAGE_KEY);
+      enginePath = bundledEnginePath;
+      diagnostic = await diagnoseEngineForPath(enginePath);
+    }
+    enginePathValid = Boolean(diagnostic);
+    engineReady = Boolean(diagnostic?.ok);
+    if (!diagnostic && savedEnginePath) {
+      engineDetail = `Saved engine path not found: ${savedEnginePath}`;
+    } else if (diagnostic?.ok) {
+      engineDetail = `Found: ${enginePath}`;
+    }
+    if (diagnostic && !diagnostic.ok) {
+      engineDetail = `Found engine, but missing ${diagnostic.missing.length} required runtime DLL${diagnostic.missing.length === 1 ? "" : "s"}.`;
+    }
+  }
+  setSetupCheck(
+    "#setup-check-engine",
+    "#setup-engine-icon",
+    "#setup-engine-detail",
+    engineReady ? "ready" : "missing",
+    engineReady ? "✓" : "!",
+    engineDetail,
+  );
+  el<HTMLButtonElement>("#setup-wizard-load-engine").disabled = !enginePathValid || Boolean(engineStatus?.engineLoaded);
+
+  let models: ModelListing[] = [];
+  try {
+    models = await invoke<ModelListing[]>("list_models");
+  } catch {
+    models = [];
+  }
+  const modelSelect = el<HTMLSelectElement>("#model-select");
+  let selectedModel = modelSelect.value || localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+  if (!selectedModel && models.length > 0) {
+    const recommended = [...models].sort((a, b) => modelSortRank(a) - modelSortRank(b))[0];
+    selectedModel = recommended.path;
+    localStorage.setItem(MODEL_PATH_STORAGE_KEY, selectedModel);
+    addLocalModelOption(selectedModel, modelDisplayName(recommended));
+  }
+  const modelReady = Boolean(engineStatus?.modelLoaded || selectedModel || models.length > 0);
+  const modelDetail = engineStatus?.modelLoaded
+    ? "Loaded and ready"
+    : selectedModel
+      ? `Selected: ${selectedModel}`
+      : models.length > 0
+        ? `${models.length} model folder${models.length === 1 ? "" : "s"} found. Select or load one.`
+        : "No Higgs model folder found. Download a model folder or browse to one.";
+  setSetupCheck(
+    "#setup-check-model",
+    "#setup-model-icon",
+    "#setup-model-detail",
+    modelReady ? "ready" : "missing",
+    modelReady ? "✓" : "!",
+    modelDetail,
+  );
+  el<HTMLButtonElement>("#setup-wizard-load-model").disabled = !selectedModel || Boolean(engineStatus?.modelLoaded);
+
+  const whisperPath = localStorage.getItem("higgsAudio.whisperModel") || "";
+  setSetupCheck(
+    "#setup-check-whisper",
+    "#setup-whisper-icon",
+    "#setup-whisper-detail",
+    whisperPath ? "ready" : "optional",
+    whisperPath ? "✓" : "i",
+    whisperPath ? `Selected: ${whisperPath}` : "Optional. Download only if you want auto-transcription.",
+  );
+
+  const readyCount = Number(engineReady) + Number(modelReady);
+  setText(
+    "#setup-wizard-summary",
+    readyCount === 2
+      ? "Core setup found. You can load anything not already loaded, or close this wizard."
+      : "Some core setup files are missing. Use Browse if you already have them, or Download to fetch them.",
+  );
+}
+
+async function maybeShowSetupWizard(): Promise<void> {
+  const modal = document.querySelector<HTMLDivElement>("#setup-wizard-modal");
+  const diagnostic = document.querySelector<HTMLDivElement>("#engine-diagnostic-modal");
+  if (!modal) return;
+  if (localStorage.getItem(FIRST_RUN_WIZARD_STORAGE_KEY) === "true") return;
+  if (setupWizardOpen) return;
+  if (engineDiagnosticVisible || (diagnostic && !diagnostic.classList.contains("hidden"))) return;
+  await refreshSetupWizardState();
+  modal.classList.remove("hidden");
+  setupWizardOpen = true;
+}
+
+function initSetupWizard(): void {
+  const modal = el<HTMLDivElement>("#setup-wizard-modal");
+  const close = () => hideSetupWizard(true);
+  el("#setup-wizard-close").addEventListener("click", close);
+  el("#setup-wizard-skip").addEventListener("click", close);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) close();
+  });
+  el("#setup-wizard-refresh").addEventListener("click", () => {
+    void refreshSetupWizardState();
+  });
+  el("#setup-wizard-browse-engine").addEventListener("click", () => {
+    void doBrowseEngine().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-download-engine").addEventListener("click", () => {
+    hideSetupWizard(false);
+    el<HTMLButtonElement>("#download-engine-btn").click();
+  });
+  el("#setup-wizard-load-engine").addEventListener("click", () => {
+    void doLoadEngine().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-browse-model").addEventListener("click", () => {
+    void doBrowseModel().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-download-model").addEventListener("click", () => {
+    hideSetupWizard(false);
+    el<HTMLButtonElement>("#download-trigger").click();
+  });
+  el("#setup-wizard-load-model").addEventListener("click", () => {
+    void doLoadModel().then(() => refreshSetupWizardState());
+  });
+  el("#setup-wizard-download-whisper").addEventListener("click", () => {
+    hideSetupWizard(false);
+    el<HTMLButtonElement>("#whisper-download-trigger").click();
+  });
+  el("#setup-wizard-continue").addEventListener("click", close);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -482,6 +677,7 @@ function initSettings(): void {
     });
   });
   el<HTMLButtonElement>("#quit-app-btn").addEventListener("click", () => {
+    clearApiLogsForFreshSession();
     void invoke("quit_app").catch((error) => {
       showToast(`Quit failed: ${String(error)}`, "error");
     });
@@ -501,6 +697,32 @@ function initExternalLinks(): void {
 
 function ttsPresetUrl(preset: TtsModelPreset): string {
   return `${HIGGS_MODEL_RESOLVE_BASE}/models/${preset.folder}/${preset.filename}`;
+}
+
+function ttsPresetPackageFiles(preset: TtsModelPreset): string[] {
+  return [preset.filename, ...HIGGS_MODEL_ASSET_FILES];
+}
+
+function ttsPresetPackageEntries(preset: TtsModelPreset): Array<{ url: string; destDir: string; filename: string }> {
+  return ttsPresetPackageFiles(preset).map((filename) => ({
+    url: `${HIGGS_MODEL_RESOLVE_BASE}/models/${preset.folder}/${filename}`,
+    destDir: `models/${preset.folder}`,
+    filename,
+  }));
+}
+
+function ttsPresetFromModelDownloadUrl(url: string): TtsModelPreset | null {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/\/models\/([^/]+)\/([^/]+)$/);
+    if (!match) return null;
+    const folder = decodeURIComponent(match[1]);
+    const filename = decodeURIComponent(match[2]);
+    return HIGGS_MODEL_PRESETS.find((preset) =>
+      preset.folder === folder && ttsPresetPackageFiles(preset).includes(filename)) || null;
+  } catch {
+    return null;
+  }
 }
 
 function ttsPresetById(id: string | null | undefined): TtsModelPreset {
@@ -714,6 +936,15 @@ function persistApiLogs(): void {
     localStorage.setItem(API_LOG_STORAGE_KEY, JSON.stringify(apiLogs.slice(-300)));
   } catch {
     // Best-effort cache for the detachable console.
+  }
+}
+
+function clearApiLogsForFreshSession(): void {
+  apiLogs.splice(0, apiLogs.length);
+  try {
+    localStorage.removeItem(API_LOG_STORAGE_KEY);
+  } catch {
+    // Best-effort cleanup only.
   }
 }
 
@@ -1115,11 +1346,17 @@ async function refreshModelList(): Promise<void> {
   }
 }
 
-async function doLoadEngine(): Promise<void> {
+async function doLoadEngine(libraryPath?: string): Promise<void> {
   try {
-    const bundled = await invoke<string | null>("bundled_engine_path");
-    const libPath = bundled ?? undefined;
-    const diagnostic = await diagnoseEngineForPath(libPath);
+    const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+    const bundled = libraryPath ? null : await invoke<string | null>("bundled_engine_path");
+    let libPath = libraryPath || savedEnginePath || bundled || undefined;
+    let diagnostic = await diagnoseEngineForPath(libPath);
+    if (!libraryPath && savedEnginePath && !diagnostic && bundled) {
+      localStorage.removeItem(ENGINE_PATH_STORAGE_KEY);
+      libPath = bundled;
+      diagnostic = await diagnoseEngineForPath(libPath);
+    }
     if (diagnostic && !diagnostic.ok) {
       showEngineDiagnosticModal(diagnostic);
       showToast("Engine dependency missing. Opened repair details.", "error");
@@ -1129,6 +1366,7 @@ async function doLoadEngine(): Promise<void> {
       libraryPath: libPath,
     });
     if (result.success) {
+      if (libPath) localStorage.setItem(ENGINE_PATH_STORAGE_KEY, libPath);
       engineSupportsStreaming = Boolean(result.supportsStreaming);
       setText("#engine-chip", "Engine loaded");
       el<HTMLElement>("#engine-chip").classList.add("active");
@@ -1136,13 +1374,25 @@ async function doLoadEngine(): Promise<void> {
       await refreshModelList();
     }
   } catch (e) {
+    const savedEnginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
     const bundled = await invoke<string | null>("bundled_engine_path").catch(() => null);
-    const diagnostic = await diagnoseEngineForPath(bundled ?? undefined);
+    const diagnostic = await diagnoseEngineForPath(libraryPath || savedEnginePath || bundled || undefined);
     if (diagnostic) {
       showEngineDiagnosticModal({ ...diagnostic, rawError: String(e) });
     }
     showToast(`Failed to load engine: ${e}`, "error");
   }
+}
+
+async function doBrowseEngine(): Promise<string | null> {
+  const selected = await open({
+    filters: [{ name: "Higgs Engine", extensions: ["dll", "so", "dylib"] }],
+  });
+  const path = Array.isArray(selected) ? selected[0] : selected;
+  if (!path) return null;
+  localStorage.setItem(ENGINE_PATH_STORAGE_KEY, path);
+  showToast(`Selected engine: ${path.split(/[/\\]/).pop() || path}`);
+  return path;
 }
 
 async function doLoadModel(): Promise<void> {
@@ -1204,7 +1454,9 @@ async function doUnloadModel(): Promise<void> {
 function initModelPanel(): void {
   const savedModelPath = localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
   if (savedModelPath) addLocalModelOption(savedModelPath);
-  el("#load-engine-btn").addEventListener("click", doLoadEngine);
+  el("#load-engine-btn").addEventListener("click", () => {
+    void doLoadEngine();
+  });
   el("#load-model-btn").addEventListener("click", doLoadModel);
   el("#unload-model-btn").addEventListener("click", doUnloadModel);
   el("#browse-model-btn").addEventListener("click", doBrowseModel);
@@ -1218,9 +1470,9 @@ function initModelPanel(): void {
   });
 }
 
-async function doBrowseModel(): Promise<void> {
+async function doBrowseModel(): Promise<string | null> {
   const selected = await open({ directory: true, multiple: false });
-  if (!selected) return;
+  if (!selected) return null;
 
   const dirPath = Array.isArray(selected) ? selected[0] : selected;
   const dirName = dirPath.split(/[/\\]/).pop() || dirPath;
@@ -1246,7 +1498,7 @@ async function doBrowseModel(): Promise<void> {
     if (opt.value === dirPath) {
       select.value = dirPath;
       showToast(`Selected: ${dirName}`);
-      return;
+      return dirPath;
     }
   }
   const opt = document.createElement("option");
@@ -1256,6 +1508,7 @@ async function doBrowseModel(): Promise<void> {
   select.value = dirPath;
   showToast(`Added local model: ${dirName}`);
   el<HTMLButtonElement>("#load-model-btn").disabled = false;
+  return dirPath;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1264,11 +1517,20 @@ async function doBrowseModel(): Promise<void> {
 
 function setupDropzone(
   dropzoneId: string,
-  onFile: (path: string, name: string) => void,
+  onFile: (path: string, name: string) => void | Promise<void>,
   onRemove?: () => void,
 ): void {
   const dz = el<HTMLElement>(dropzoneId);
   dz.dataset.emptyHtml = dz.innerHTML;
+  dropzoneHandlers.push({ selector: dropzoneId, onFile });
+
+  const handleFile = async (path: string, name: string) => {
+    try {
+      await onFile(path, name);
+    } catch (e) {
+      showToast(`Audio upload failed: ${e}`, "error");
+    }
+  };
 
   dz.addEventListener("click", async (event) => {
     const target = event.target as HTMLElement;
@@ -1283,7 +1545,7 @@ function setupDropzone(
     });
     if (selected) {
       const name = selected.split(/[/\\]/).pop() || selected;
-      onFile(selected, name);
+      await handleFile(selected, name);
     }
   });
 
@@ -1298,7 +1560,11 @@ function setupDropzone(
     const files = e.dataTransfer?.files;
     if (files && files.length > 0) {
       const file = files[0];
-      onFile((file as any).path || file.name, file.name);
+      const path = (file as any).path as string | undefined;
+      if (!path) {
+        return;
+      }
+      void handleFile(path, file.name);
     }
   });
 }
@@ -1319,6 +1585,73 @@ function clearDropzone(dropzoneId: string): void {
   const dz = el<HTMLElement>(dropzoneId);
   dz.classList.remove("has-file", "drag-over");
   dz.innerHTML = dz.dataset.emptyHtml || "";
+}
+
+function clearAllDropzoneHover(): void {
+  for (const item of document.querySelectorAll<HTMLElement>(".dropzone.drag-over")) {
+    item.classList.remove("drag-over");
+  }
+}
+
+async function routeDroppedAudioPath(target: HTMLElement | null, path: string): Promise<boolean> {
+  const dz = target?.closest<HTMLElement>(".dropzone");
+  if (!dz) return false;
+  const name = path.split(/[/\\]/).pop() || path;
+  const registered = dropzoneHandlers.find((handler) => dz.matches(handler.selector));
+  if (registered) {
+    await registered.onFile(path, name);
+    return true;
+  }
+  if (dz.closest("#speaker-library")) {
+    const speaker = speakerFromElement(dz);
+    if (!speaker) return false;
+    await setSpeakerAudioFromPath(speaker, path, name);
+    return true;
+  }
+  if (dz.closest("#multi-lines")) {
+    const line = lineFromElement(dz);
+    if (!line) return false;
+    await setLineAudioFromPath(line, path, name);
+    return true;
+  }
+  return false;
+}
+
+function elementFromTauriDropPosition(position: { x: number; y: number }): HTMLElement | null {
+  const scale = window.devicePixelRatio || 1;
+  const attempts = [
+    { x: position.x / scale, y: position.y / scale },
+    { x: position.x, y: position.y },
+  ];
+  for (const point of attempts) {
+    const target = document.elementFromPoint(point.x, point.y) as HTMLElement | null;
+    if (target) return target;
+  }
+  return null;
+}
+
+function initTauriDropzones(): void {
+  void getCurrentWebview().onDragDropEvent((event) => {
+    const payload = event.payload as any;
+    if (payload.type === "leave") {
+      clearAllDropzoneHover();
+      return;
+    }
+    if (!payload.position) return;
+    const target = elementFromTauriDropPosition(payload.position);
+    const dz = target?.closest<HTMLElement>(".dropzone");
+    clearAllDropzoneHover();
+    if (dz) dz.classList.add("drag-over");
+    if (payload.type !== "drop") return;
+    clearAllDropzoneHover();
+    const firstPath = Array.isArray(payload.paths) ? payload.paths[0] : "";
+    if (!firstPath) return;
+    void routeDroppedAudioPath(target, firstPath).catch((e) => {
+      showToast(`Audio drop failed: ${e}`, "error");
+    });
+  }).catch((e) => {
+    console.warn("Tauri drag/drop unavailable", e);
+  });
 }
 
 function drawRefPreview(kind: RefPreviewKind): void {
@@ -1448,6 +1781,7 @@ function initRefPlayer(kind: RefPreviewKind): void {
     waveformPath: "",
     waveformLoading: false,
     raf: null,
+    blobUrl: null,
   };
   player.audio.preload = "metadata";
   player.play.addEventListener("click", async () => {
@@ -1492,8 +1826,21 @@ function showRefPreview(kind: RefPreviewKind, path: string): void {
   preview.classList.remove("hidden");
   player.audio.pause();
   stopRefLoop(kind);
-  player.audio.src = convertFileSrc(path);
-  player.audio.load();
+  if (IS_WINDOWS) {
+    player.audio.src = convertFileSrc(path);
+    player.audio.load();
+  } else {
+    void invoke<string>("read_audio_file_base64", { path }).then((b64) => {
+      void base64ToBlobAsync(b64, "audio/*").then((blob) => {
+        if (player.blobUrl) URL.revokeObjectURL(player.blobUrl);
+        player.blobUrl = URL.createObjectURL(blob);
+        player.audio.src = player.blobUrl;
+        player.audio.load();
+      });
+    }).catch(() => {
+      showToast("Could not load reference audio", "warning");
+    });
+  }
   player.seek.value = "0";
   void loadRefWaveform(kind, path);
   updateRefPlayback(kind);
@@ -1563,12 +1910,13 @@ function initDropzones(): void {
     hideRefPreview("gallery");
   };
 
-  setupDropzone("#clone-dropzone", (path, name) => {
-    cloneRefPath = path;
+  setupDropzone("#clone-dropzone", async (path, name) => {
+    const prepared = await prepareReferenceAudioFile(path, name);
+    cloneRefPath = prepared.path;
     clonePersonaId = "";
-    cloneRefName = name;
-    setDropzoneFile("#clone-dropzone", name);
-    showRefPreview("clone", path);
+    cloneRefName = prepared.name;
+    setDropzoneFile("#clone-dropzone", prepared.name);
+    showRefPreview("clone", prepared.path);
   }, clearClone);
   setupDropzone("#finish-dropzone", (path, name) => {
     finishRefPath = path;
@@ -1585,12 +1933,13 @@ function initDropzones(): void {
         speakerPersonas.push(persona);
         selectedGalleryPersonaId = persona.id;
       }
+      const prepared = await prepareReferenceAudioFile(path, name);
       if (!persona.name || /^Speaker \d+$/.test(persona.name)) {
-        persona.name = personaNameFromPath(path);
+        persona.name = personaNameFromPath(name || path);
       }
-      const stored = await storeSpeakerAsset(persona, path, "audio");
+      const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
       persona.refPath = stored.path;
-      persona.refName = name || stored.fileName;
+      persona.refName = prepared.name || stored.fileName;
       persona.cachePath = "";
       await ensureSpeakerCachePath(persona);
       persona.updatedAt = Date.now();
@@ -1679,6 +2028,27 @@ async function pickAudioFile(): Promise<{ path: string; name: string } | null> {
   if (!selected) return null;
   const path = Array.isArray(selected) ? selected[0] : selected;
   return { path, name: path.split(/[/\\]/).pop() || path };
+}
+
+async function prepareReferenceAudioFile(path: string, name?: string): Promise<{ path: string; name: string; cropped: boolean }> {
+  const originalName = name || path.split(/[/\\]/).pop() || "reference audio";
+  const result = await invoke<PreparedReferenceUpload>("prepare_reference_upload", {
+    audioPath: path,
+    maxSeconds: HIGGS_REFERENCE_MAX_SECONDS,
+  });
+  if (result.cropped) {
+    showToast(`Reference cropped to first ${HIGGS_REFERENCE_MAX_SECONDS} seconds`, "warning");
+  }
+  return {
+    path: result.path,
+    name: result.cropped ? `${originalName} (first ${HIGGS_REFERENCE_MAX_SECONDS}s)` : originalName,
+    cropped: result.cropped,
+  };
+}
+
+async function pickReferenceAudioFile(): Promise<{ path: string; name: string; cropped: boolean } | null> {
+  const file = await pickAudioFile();
+  return file ? prepareReferenceAudioFile(file.path, file.name) : null;
 }
 
 async function pickImageFile(): Promise<string | null> {
@@ -2511,14 +2881,23 @@ function scrollMultiModeDuringDrag(clientY: number): void {
   else if (clientY > rect.bottom - edge) mode.scrollTop += 18;
 }
 
+async function setSpeakerAudioFromPath(speaker: MultiSpeaker, path: string, name?: string): Promise<void> {
+  const prepared = await prepareReferenceAudioFile(path, name);
+  speaker.personaId = "";
+  speaker.refPath = prepared.path;
+  speaker.refName = prepared.name;
+  speaker.cachePath = "";
+  renderMultiSpeakers();
+}
+
 async function setSpeakerAudioFromDrop(speaker: MultiSpeaker, files: FileList | null): Promise<void> {
   const file = files?.[0];
   if (!file) return;
-  speaker.personaId = "";
-  speaker.refPath = (file as any).path || file.name;
-  speaker.refName = file.name;
-  speaker.cachePath = "";
-  renderMultiSpeakers();
+  const path = (file as any).path as string | undefined;
+  if (!path) {
+    return;
+  }
+  await setSpeakerAudioFromPath(speaker, path, file.name);
 }
 
 function applyPersonaToMultiSpeaker(speaker: MultiSpeaker, personaId: string): void {
@@ -2580,12 +2959,21 @@ async function savePersonaFromMultiSpeaker(speaker: MultiSpeaker): Promise<void>
   showToast(`Saved speaker identity: ${persona.name}`);
 }
 
+async function setLineAudioFromPath(line: MultiLine, path: string, name?: string): Promise<void> {
+  const prepared = await prepareReferenceAudioFile(path, name);
+  line.overridePath = prepared.path;
+  line.overrideName = prepared.name;
+  renderMultiLines();
+}
+
 async function setLineAudioFromDrop(line: MultiLine, files: FileList | null): Promise<void> {
   const file = files?.[0];
   if (!file) return;
-  line.overridePath = (file as any).path || file.name;
-  line.overrideName = file.name;
-  renderMultiLines();
+  const path = (file as any).path as string | undefined;
+  if (!path) {
+    return;
+  }
+  await setLineAudioFromPath(line, path, file.name);
 }
 
 function applyTaggedScriptImport(): void {
@@ -2730,10 +3118,12 @@ function initMultiSpeakerWorkflow(): void {
       }
       renderMultiWorkflow();
     } else if (action === "pick-speaker-audio") {
-      const file = await pickAudioFile();
+      const file = await pickReferenceAudioFile();
       if (file) {
         speaker.refPath = file.path;
         speaker.refName = file.name;
+        speaker.personaId = "";
+        speaker.cachePath = "";
         renderMultiSpeakers();
       }
     } else if (action === "clear-audio") {
@@ -2800,7 +3190,7 @@ function initMultiSpeakerWorkflow(): void {
       multiLines.splice(idx, 1);
       renderMultiLines();
     } else if (action === "pick-line-audio") {
-      const file = await pickAudioFile();
+      const file = await pickReferenceAudioFile();
       if (file) {
         line.overridePath = file.path;
         line.overrideName = file.name;
@@ -4305,6 +4695,7 @@ function initDownload(): void {
     setProgress("#download-progress-bar", 0, 1);
     setText("#download-size-text", "0 / 0");
     setText("#download-speed-text", "0 MB/s");
+    activeDownloadFileLabel = "";
     updateDownloadIndicator("running");
 
     try {
@@ -4319,11 +4710,27 @@ function initDownload(): void {
         setWhisperModelPath(result.path);
         showToast("Whisper model downloaded");
       } else {
-        const target = modelDownloadTarget(url);
-        await invoke<{ path: string; size: number }>("download_model", {
-          request: { url, destDir: target.destDir, filename: target.filename },
-        });
-        showToast("Download complete");
+        const selectedPreset = ttsPresetById(presetSelect.value);
+        const preset = ttsPresetFromModelDownloadUrl(url) ||
+          (url === ttsPresetUrl(selectedPreset) ? selectedPreset : null);
+        if (preset) {
+          const entries = ttsPresetPackageEntries(preset);
+          for (let index = 0; index < entries.length; index += 1) {
+            const entry = entries[index];
+            activeDownloadFileLabel = `File ${index + 1}/${entries.length}: ${entry.filename}`;
+            setText("#download-speed-text", `${activeDownloadFileLabel} · 0 MB/s`);
+            await invoke<{ path: string; size: number }>("download_model", {
+              request: { url: entry.url, destDir: entry.destDir, filename: entry.filename },
+            });
+          }
+          showToast(`${preset.label} folder downloaded`);
+        } else {
+          const target = modelDownloadTarget(url);
+          await invoke<{ path: string; size: number }>("download_model", {
+            request: { url, destDir: target.destDir, filename: target.filename },
+          });
+          showToast("Download complete");
+        }
         await refreshModelList();
       }
     } catch (e) {
@@ -4336,6 +4743,7 @@ function initDownload(): void {
     } finally {
       downloadActive = false;
       downloadPaused = false;
+      activeDownloadFileLabel = "";
       updateDownloadIndicator("complete");
     }
   };
@@ -4717,13 +5125,14 @@ async function initEventListeners(): Promise<void> {
     setText("#download-size-text", `${formatBytes(p.downloaded)} / ${formatBytes(p.total)}`);
     downloadPaused = p.status === "paused";
     if (p.status === "paused") {
-      setText("#download-speed-text", "Paused");
+      setText("#download-speed-text", activeDownloadFileLabel ? `${activeDownloadFileLabel} · Paused` : "Paused");
     } else if (p.status === "cancelled") {
       setText("#download-speed-text", "Stopped");
     } else if (p.status === "complete") {
-      setText("#download-speed-text", "Complete");
+      setText("#download-speed-text", activeDownloadFileLabel ? `${activeDownloadFileLabel} · Complete` : "Complete");
     } else {
-      setText("#download-speed-text", `${p.speedMbps.toFixed(1)} MB/s`);
+      const speed = `${p.speedMbps.toFixed(1)} MB/s`;
+      setText("#download-speed-text", activeDownloadFileLabel ? `${activeDownloadFileLabel} · ${speed}` : speed);
     }
     updateDownloadIndicator(p.status);
   });
@@ -4766,6 +5175,7 @@ function initPlatformLabels(): void {
 
 async function main(): Promise<void> {
   initPlatformLabels();
+  clearApiLogsForFreshSession();
   initTooltips();
   initSettings();
   initExternalLinks();
@@ -4777,10 +5187,12 @@ async function main(): Promise<void> {
   initDropzones();
   initSpeakerPersonas();
   initMultiSpeakerWorkflow();
+  initTauriDropzones();
   initAdvancedOptions();
   initGenerate();
   initAudioPlayer();
   initDownload();
+  initSetupWizard();
   initTextCounting();
   initHardwarePollRate();
   initHardwareCollapse();
@@ -4795,6 +5207,7 @@ async function main(): Promise<void> {
   if (bundled) {
     await doLoadEngine();
   }
+  window.setTimeout(() => void maybeShowSetupWizard(), 500);
 
   window.addEventListener("resize", () => {
     drawHardwareGraph();

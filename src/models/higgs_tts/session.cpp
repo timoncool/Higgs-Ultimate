@@ -24,8 +24,8 @@ constexpr size_t kDefaultGeneratorWeightContextBytes = 512ull * 1024ull * 1024ul
 constexpr size_t kDefaultGeneratorPrefillGraphArenaBytes = 1024ull * 1024ull * 1024ull;
 constexpr size_t kDefaultGeneratorDecodeGraphArenaBytes = 1024ull * 1024ull * 1024ull;
 constexpr size_t kDefaultCodecWeightContextBytes = 1024ull * 1024ull * 1024ull;
-constexpr size_t kDefaultCodecGraphArenaBytes = 1024ull * 1024ull * 1024ull;
-constexpr int64_t kDefaultTextChunkSize = 1024;
+constexpr size_t kDefaultCodecGraphArenaBytes = 4ull * 1024ull * 1024ull * 1024ull;
+constexpr int64_t kDefaultTextChunkSize = 300;
 constexpr int64_t kDefaultFirstStreamFrames = 20;
 constexpr int64_t kDefaultStreamFrames = 40;
 

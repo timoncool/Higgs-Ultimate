@@ -7,22 +7,23 @@
 ![Engine](https://img.shields.io/badge/engine-C%2B%2B%20via%20C%20ABI-00599C)
 ![Build](https://img.shields.io/badge/build-MSVC%202022%20%7C%20GCC%2FClang-success)
 
-[中文说明](README_ZH.md) | [Windows/main branch](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/main)
+[中文说明](README_ZH.md) | [Linux branch](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux)
 
 https://github.com/user-attachments/assets/67a9eeff-415f-4f48-b65c-50c3f9bd2367
 
 Author: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.31` is a Windows and Linux desktop app built with
+Higgs Audio v3 Studio `0.2.40` is a Windows and Linux desktop app built with
 Rust/Tauri for local Higgs Audio v3 TTS inference through a ported native
 C++/CUDA engine. The app does not shell out to a CLI sidecar: the Tauri UI calls
 Rust commands, Rust loads `audiocpp_engine.dll` (Windows) or
 `libaudiocpp_engine.so` (Linux) with `libloading`, and the engine executes the
 native inference path through a small C ABI.
 
-This `linux` branch contains the Linux-enabled desktop build and packaging notes.
-Windows release work continues on the
-[`main`](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/main) branch.
+This `main` branch tracks the Windows desktop release. Linux `.deb` and AppImage
+builds are available from the same GitHub Releases page and are built from the
+[`linux`](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux)
+branch.
 
 The goal is simple: a practical desktop workflow for local TTS, voice cloning,
 speech continuation, and multi-speaker generation without making users manage a
@@ -33,6 +34,7 @@ Python environment.
 Prebuilt packages are published from:
 
 - GitHub releases: https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases
+- Linux branch source: https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux
 - Hugging Face runtime repository: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio
 - Runtime manifest: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/manifest.json
 - Checksums: https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/checksums/SHA256SUMS.txt
@@ -54,7 +56,7 @@ Recommended user flow:
 1. Download the latest release from GitHub (Windows `.exe` installer or Linux `.deb`/AppImage).
 2. Launch `Higgs Audio v3 Studio`.
 3. Click `Download Engine DLLs` (Windows) or `Download Engine Files` (Linux) if the engine package is not installed.
-4. Download or browse to a Higgs model folder.
+4. Download or browse to a Higgs model folder. In-app Higgs downloads fetch the whole selected folder: GGUF weights plus config/tokenizer/chat-template assets.
 5. Click `Load Engine`, then `Load Model`.
 6. Pick a workflow and generate audio.
 
@@ -83,14 +85,19 @@ drbaph/Higgs-Audio-v3-Studio/
   models/
     higgs-q8_0/
       q8_0.gguf
+      config/tokenizer/chat-template assets
     higgs-q6_k/
       q6_k.gguf
+      config/tokenizer/chat-template assets
     higgs-q5_k/
       q5_k.gguf
+      config/tokenizer/chat-template assets
     higgs-q4_k_m/
       q4_k_m.gguf
+      config/tokenizer/chat-template assets
     higgs-bf16/
       bf16.gguf
+      config/tokenizer/chat-template assets
   checksums/
     SHA256SUMS.txt
 ```
@@ -104,7 +111,7 @@ Hugging Face repo root so the runtime links resolve under `/resolve/main/...`.
 
 - Runs the ported Higgs Audio v3 C++/CUDA engine inside a Tauri desktop app.
 - Supports normal TTS, voice cloning, speech continuation, and multi-speaker workflows.
-- Supports reference voice drag/drop, replacement, waveform previews, and remove buttons.
+- Supports reference voice drag/drop, replacement, waveform previews, remove buttons, and automatic 30-second reference preparation for voice cloning and Speaker Gallery uploads.
 - Supports optional live streaming playback during generation, with de-clicked chunk edges, waveform scrubbing, and play/pause control for the live stream.
 - Supports optional Whisper auto-transcription for reference transcripts.
 - Includes a Whisper model selector with direct `whisper.cpp` model downloads.
@@ -221,14 +228,19 @@ Default downloaded model folders:
 models/
   higgs-q8_0/
     q8_0.gguf
+    config/tokenizer/chat-template assets
   higgs-q6_k/
     q6_k.gguf
+    config/tokenizer/chat-template assets
   higgs-q5_k/
     q5_k.gguf
+    config/tokenizer/chat-template assets
   higgs-q4_k_m/
     q4_k_m.gguf
+    config/tokenizer/chat-template assets
   higgs-bf16/
     bf16.gguf
+    config/tokenizer/chat-template assets
 models/whisper/
   ggml-base.en-q8_0.bin      # optional, used by auto-transcribe
 ```
@@ -292,7 +304,11 @@ only need a working NVIDIA driver.
 
 Speaker Gallery identities are optional. Voice Clone, Continue Speech, and Multi
 Speaker can use a saved identity, but users can still upload one-off reference
-audio without saving it.
+audio without saving it. One-off voice-clone references and Speaker Gallery
+uploads are automatically prepared as WAV and capped to the first 30 seconds so
+long accidental uploads do not waste inference setup time. Continue Speech keeps
+the full source audio because that workflow may intentionally continue longer
+material.
 
 When a speaker identity is created or edited, the app keeps its files in the
 user app data speaker store. Each speaker gets a folder named from the speaker
@@ -361,13 +377,13 @@ Finished-file routes accept `response_format: "wav"` or `response_format: "mp3"`
 `/v1/higgs/audio/stream` emits NDJSON events such as `queued`, `start`,
 `progress`, `audio`, `final`, `done`, and `error`. Audio chunks are delivered as
 `wavBase64` fields so simple clients can parse progress and audio from one
-response stream.
+response stream. The live chunks are WAV. The `final` event respects
+`response_format`: it returns `wavBase64` for WAV or `mp3Base64` for MP3.
 
 For script playback, read the HTTP response line-by-line. When `event` is
 `audio`, base64-decode `wavBase64` and feed those WAV bytes to your player or
-audio queue. When `event` is `final`, base64-decode that `wavBase64` as the
-clean finished WAV file for saving or replacing the preview. The stream endpoint
-currently uses WAV chunks only; use the finished-file routes when you want MP3.
+audio queue. When `event` is `final`, check `encoding`. Save `wavBase64` when it
+is `wav-base64`, or `mp3Base64` when it is `mp3-base64`.
 
 Minimal Python stream reader:
 
@@ -386,7 +402,10 @@ with requests.post(url, headers=headers, json=payload, stream=True, timeout=600)
             wav_chunk = base64.b64decode(event["wavBase64"])
             # Push wav_chunk to your audio playback queue here.
         elif event["event"] == "final":
-            open("final.wav", "wb").write(base64.b64decode(event["wavBase64"]))
+            if event.get("encoding") == "mp3-base64":
+                open("final.mp3", "wb").write(base64.b64decode(event["mp3Base64"]))
+            else:
+                open("final.wav", "wb").write(base64.b64decode(event["wavBase64"]))
 ```
 
 The API tab includes examples for curl, Python, JavaScript, and PowerShell. Its
@@ -469,12 +488,18 @@ After launching by any method:
 <details open>
 <summary>Higgs and Whisper model setup</summary>
 
-The model selector expects model folders, not loose files. A good layout is:
+The model selector expects model folders, not loose files. A good downloaded
+folder layout is:
 
 ```text
 models/
   higgs-q8_0/
     q8_0.gguf
+    chat_template.jinja
+    config.json
+    higgs_audio_v2_tokenizer_config.json
+    tokenizer.json
+    tokenizer_config.json
   higgs-q6_k/
     q6_k.gguf
   higgs-q5_k/
@@ -485,10 +510,12 @@ models/
     bf16.gguf
 ```
 
-`Higgs Audio v3 Q8_0` is the recommended model in the app. Shared config and
-tokenizer assets can be packaged once with the app under
-`desktop/src-tauri/resources/higgs-assets/higgs-audio-v3-tts-4b/`, so the
-downloaded model folders only need the `.gguf` files.
+`Higgs Audio v3 Q8_0` is the recommended model in the app. In-app Higgs model
+downloads now fetch the whole selected model folder: the `.gguf` file plus
+`chat_template.jinja`, `config.json`,
+`higgs_audio_v2_tokenizer_config.json`, `tokenizer.json`, and
+`tokenizer_config.json`. The progress bar shows the current file and per-file
+download progress, for example `File 1/6: q8_0.gguf`.
 
 Recommended VRAM:
 
@@ -767,9 +794,10 @@ Expected behavior:
 
 - The app opens to the main TTS workflow.
 - `Download Engine DLLs` downloads `audiocpp_engine.dll` plus the required CUDA/MSVC runtime DLLs.
+- Higgs model downloads show `File n/6` and download the selected model folder assets plus GGUF weights.
 - `Load Engine` changes the engine chip from unloaded to loaded.
 - `Load Model` enables generation after a valid model folder is selected.
-- Voice clone and multi-speaker workflows require reference audio.
+- Voice clone and multi-speaker workflows require reference audio. New uploaded clone/Speaker Gallery references are auto-cropped to 30 seconds.
 - Multi-speaker generation checks all speech lines before starting. If a line points to a missing speaker or a speaker without a reference voice, the app stops immediately and tells you which line to fix.
 - Whisper auto-transcription requires a selected `ggml-*.bin` Whisper model.
 
@@ -813,7 +841,7 @@ full model entries.
 
 ### CUDA DLL load errors
 
-Version `0.2.31` adds an engine dependency preflight. If Windows cannot load
+Version `0.2.31` added an engine dependency preflight. If Windows cannot load
 `audiocpp_engine.dll`, the app checks common loader dependencies first and shows
 a repair dialog listing missing DLLs such as `nvcuda.dll`,
 `cublas64_13.dll`, `cublasLt64_13.dll`, `vcruntime140.dll`,
@@ -841,7 +869,7 @@ allocates KV cache for the requested maximum token cap, so very high
 `max_tokens` values can reserve much more VRAM up front even when the text is
 short.
 
-Version `0.2.31` releases Higgs runtime graphs and codec graphs after each
+Version `0.2.31` and later releases Higgs runtime graphs and codec graphs after each
 request, releases them when streaming is cancelled or errors out, checks cancel
 inside the native decode loop, and sends per-stage native VRAM diagnostics to
 the Command Centre. Use those `vram stage=...` log lines to see whether a spike

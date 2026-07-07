@@ -21,6 +21,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{App, AppHandle, Emitter, Manager, State};
 
 static STUDIO_JOB_COUNTER: AtomicU64 = AtomicU64::new(1);
+const REFERENCE_MAX_SECONDS: f64 = 30.0;
 
 /// The engine is stored as Arc<Engine> inside the mutex. When a generate call
 /// needs to run, it clones the Arc out of the lock and releases the mutex —
@@ -1062,12 +1063,27 @@ fn set_string_option(options: &mut serde_json::Value, key: &str, value: &str) {
     }
 }
 
-fn prepare_reference_audio(path: &str, options: &serde_json::Value) -> Result<String, String> {
-    if option_bool(options, "normalize_reference") {
-        audio::normalize_to_temp_wav(path, 0.95).map_err(|e| e.to_string())
-    } else {
-        audio::ensure_wav(path).map_err(|e| e.to_string())
-    }
+fn prepare_reference_audio(
+    path: &str,
+    options: &serde_json::Value,
+    max_seconds: Option<f64>,
+) -> Result<String, String> {
+    let prepared = audio::prepare_reference_wav(
+        path,
+        option_bool(options, "normalize_reference"),
+        0.95,
+        max_seconds,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(prepared.path)
+}
+
+fn prepare_voice_reference_audio(path: &str, options: &serde_json::Value) -> Result<String, String> {
+    prepare_reference_audio(path, options, Some(REFERENCE_MAX_SECONDS))
+}
+
+fn prepare_continuation_audio(path: &str, options: &serde_json::Value) -> Result<String, String> {
+    prepare_reference_audio(path, options, None)
 }
 
 #[tauri::command]
@@ -1128,7 +1144,7 @@ async fn generate_voice_clone(
         .ok_or("ref_audio_path is required for voice clone")?;
     let queue = state.generation_queue.clone();
     let mut options = request.options.unwrap_or(serde_json::json!({}));
-    let ref_wav = prepare_reference_audio(&ref_path, &options)?;
+    let ref_wav = prepare_voice_reference_audio(&ref_path, &options)?;
     let stream_playback_enabled = option_bool(&options, "stream_playback");
     let stream_backend = engine.supports_streaming();
     set_bool_option(
@@ -1187,7 +1203,7 @@ async fn generate_finish_sentence(
     let engine = state.clone_engine()?;
     let queue = state.generation_queue.clone();
     let mut options = request.options.unwrap_or(serde_json::json!({}));
-    let audio_wav = prepare_reference_audio(&request.audio_path, &options)?;
+    let audio_wav = prepare_continuation_audio(&request.audio_path, &options)?;
     let stream_playback_enabled = option_bool(&options, "stream_playback");
     let stream_backend = engine.supports_streaming();
     set_bool_option(
@@ -1871,19 +1887,18 @@ fn handle_api_stream_request(
             return (status, message);
         }
     };
-    let format = body
-        .get("response_format")
-        .and_then(|v| v.as_str())
-        .unwrap_or("wav");
-    if format != "wav" {
+    let format = match api_response_format(&body) {
+        Ok(format) => format,
+        Err(e) => {
         let (status, content_type, body, message) = json_error(
-            501,
+            400,
             "format_not_supported",
-            "streaming API currently emits wav-base64 chunks and a final wav-base64 result",
+            e,
         );
         write_http_response(stream, status, content_type, &body);
         return (status, message);
-    }
+        }
+    };
 
     let engine = match api_clone_engine(&engine_state) {
         Ok(engine) => engine,
@@ -1982,7 +1997,7 @@ fn handle_api_stream_request(
             );
             return (400, "audio_path is required".into());
         }
-        let audio_wav = match prepare_reference_audio(&audio_path, &options) {
+        let audio_wav = match prepare_continuation_audio(&audio_path, &options) {
             Ok(path) => path,
             Err(e) => {
                 let _ = write_ndjson_event(
@@ -2056,7 +2071,7 @@ fn handle_api_stream_request(
             );
             return (400, "reference audio is required".into());
         }
-        let ref_wav = match prepare_reference_audio(&ref_path, &options) {
+        let ref_wav = match prepare_voice_reference_audio(&ref_path, &options) {
             Ok(path) => path,
             Err(e) => {
                 let _ = write_ndjson_event(
@@ -2101,7 +2116,8 @@ fn handle_api_stream_request(
             "jobId": &job_id,
             "workflow": &workflow,
             "label": &label,
-            "encoding": "wav-base64",
+            "audioEncoding": "wav-base64",
+            "finalEncoding": format!("{}-base64", format),
         }),
     );
 
@@ -2183,20 +2199,39 @@ fn handle_api_stream_request(
                 Some(1),
                 "Complete",
             );
-            let _ = write_ndjson_event(
-                &writer,
-                serde_json::json!({
+            match encode_api_audio_response(&audio, format) {
+                Ok((_content_type, final_bytes)) => {
+                    let mut payload = serde_json::json!({
                     "event": "final",
                     "jobId": &job_id,
                     "sampleRate": audio.sample_rate,
                     "channels": audio.channels,
                     "sampleCount": audio.samples.len(),
-                    "encoding": "wav-base64",
-                    "wavBase64": audio.encode_base64_wav(),
-                }),
-            );
-            let _ = write_ndjson_event(&writer, serde_json::json!({ "event": "done", "jobId": &job_id }));
-            (200, "stream complete".into())
+                        "encoding": format!("{}-base64", format),
+                    });
+                    if let Some(map) = payload.as_object_mut() {
+                        let key = if format == "mp3" { "mp3Base64" } else { "wavBase64" };
+                        map.insert(key.into(), serde_json::json!(base64_encode(&final_bytes)));
+                    }
+                    let _ = write_ndjson_event(&writer, payload);
+                    let _ = write_ndjson_event(
+                        &writer,
+                        serde_json::json!({ "event": "done", "jobId": &job_id }),
+                    );
+                    (200, "stream complete".into())
+                }
+                Err(e) => {
+                    let _ = write_ndjson_event(
+                        &writer,
+                        serde_json::json!({
+                            "event": "error",
+                            "jobId": &job_id,
+                            "error": {"code": "audio_encode_failed", "message": e},
+                        }),
+                    );
+                    (500, "audio encode failed".into())
+                }
+            }
         }
         Err(e) => {
             let message = map_engine_err(&e);
@@ -2337,7 +2372,7 @@ fn handle_api_request(
                 }
                 set_string_option(&mut api_options, "reference_cache_path", &speaker.cache_path);
                 let api_options = api_stream_options(api_options);
-                let ref_wav = match prepare_reference_audio(&speaker.ref_path, &api_options) {
+                let ref_wav = match prepare_voice_reference_audio(&speaker.ref_path, &api_options) {
                     Ok(path) => path,
                     Err(e) => return json_error(400, "invalid_reference_audio", e.to_string()),
                 };
@@ -2572,7 +2607,7 @@ fn handle_api_request(
             };
             let ref_text = body.get("reference_text").and_then(|v| v.as_str());
             let api_options = api_stream_options(api_generation_options(&body));
-            let ref_wav = match prepare_reference_audio(&ref_path, &api_options) {
+            let ref_wav = match prepare_voice_reference_audio(&ref_path, &api_options) {
                 Ok(path) => path,
                 Err(e) => return json_error(400, "invalid_reference_audio", e.to_string()),
             };
@@ -2698,7 +2733,7 @@ fn handle_api_request(
             };
             let continuation = body.get("continuation_text").and_then(|v| v.as_str());
             let api_options = api_stream_options(api_generation_options(&body));
-            let audio_wav = match prepare_reference_audio(&audio_path, &api_options) {
+            let audio_wav = match prepare_continuation_audio(&audio_path, &api_options) {
                 Ok(path) => path,
                 Err(e) => return json_error(400, "invalid_audio", e.to_string()),
             };
@@ -3391,10 +3426,43 @@ fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn read_audio_file_base64(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(base64_encode(&bytes))
+}
+
+#[tauri::command]
 fn audio_waveform(audio_path: String, points: Option<usize>) -> Result<serde_json::Value, String> {
     let peaks =
         audio::waveform_peaks(&audio_path, points.unwrap_or(1200)).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "peaks": peaks }))
+}
+
+#[tauri::command]
+async fn prepare_reference_upload(
+    audio_path: String,
+    max_seconds: Option<f64>,
+) -> Result<serde_json::Value, String> {
+    let max_seconds = max_seconds
+        .filter(|seconds| *seconds > 0.0)
+        .unwrap_or(REFERENCE_MAX_SECONDS);
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        audio::prepare_reference_wav(&audio_path, false, 0.95, Some(max_seconds))
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
+    .map_err(|e| e.to_string())?;
+    let file_name = PathBuf::from(&prepared.path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("reference.wav")
+        .to_string();
+    Ok(serde_json::json!({
+        "path": prepared.path,
+        "fileName": file_name,
+        "durationSeconds": prepared.duration_seconds,
+        "cropped": prepared.cropped,
+    }))
 }
 
 #[tauri::command]
@@ -3742,11 +3810,13 @@ pub fn run() {
             save_audio_file,
             save_text_file,
             read_text_file,
+            read_audio_file_base64,
             store_speaker_asset,
             speaker_cache_path,
             write_speaker_metadata,
             export_speaker_zip,
             import_speaker_zip,
+            prepare_reference_upload,
             audio_waveform,
             read_audio_as_wav,
             open_external_url,

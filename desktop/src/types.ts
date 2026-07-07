@@ -222,6 +222,7 @@ export type RefPlayer = {
   waveformPath: string;
   waveformLoading: boolean;
   raf: number | null;
+  blobUrl: string | null;
 };
 
 export type WavPcm = {
