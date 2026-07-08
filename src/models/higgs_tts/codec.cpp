@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -56,6 +57,9 @@ constexpr int64_t kCodecSemanticHeads = 12;
 constexpr int64_t kCodecSemanticLayers = 12;
 constexpr int64_t kCodecDecodeFallbackFrames = 256;
 constexpr int64_t kCodecDecodeFallbackOverlapFrames = 8;
+constexpr int64_t kCodecDecodeFallbackMinFrames = 1;
+constexpr int64_t kCodecDecodeFallbackMaxFrames = 1024;
+constexpr int64_t kCodecDecodeFallbackMaxOverlapFrames = 64;
 
 struct GgmlContextDeleter {
     void operator()(ggml_context * ctx) const noexcept {
@@ -1551,10 +1555,45 @@ HiggsAudioCodeMatrix trim_decodable_codes(const HiggsAudioCodeMatrix & raw_codes
     return out;
 }
 
-bool is_codec_graph_allocation_failure(const std::runtime_error & error) {
+int64_t env_int64_or_default(
+    const char * name,
+    int64_t fallback,
+    int64_t minimum,
+    int64_t maximum) {
+    const char * raw = std::getenv(name);
+    if (raw == nullptr || raw[0] == '\0') {
+        return fallback;
+    }
+    try {
+        return std::clamp(std::stoll(raw), minimum, maximum);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+int64_t codec_decode_fallback_frames() {
+    return env_int64_or_default(
+        "HIGGS_TTS_CODEC_FALLBACK_FRAMES",
+        kCodecDecodeFallbackFrames,
+        kCodecDecodeFallbackMinFrames,
+        kCodecDecodeFallbackMaxFrames);
+}
+
+int64_t codec_decode_fallback_overlap_frames() {
+    return env_int64_or_default(
+        "HIGGS_TTS_CODEC_FALLBACK_OVERLAP_FRAMES",
+        kCodecDecodeFallbackOverlapFrames,
+        0,
+        kCodecDecodeFallbackMaxOverlapFrames);
+}
+
+bool is_codec_graph_retryable_failure(const std::runtime_error & error) {
     const std::string message = error.what();
     return message.find("allocate Higgs TTS codec graph") != std::string::npos ||
-           message.find("initialize Higgs TTS codec graph context") != std::string::npos;
+           message.find("initialize Higgs TTS codec graph context") != std::string::npos ||
+           message.find("Higgs TTS codec graph compute failed") != std::string::npos ||
+           message.find("Higgs TTS codec decoder produced fewer samples") != std::string::npos ||
+           message.find("Higgs TTS codec decoder output trim is not symmetric") != std::string::npos;
 }
 
 HiggsAudioCodeMatrix slice_code_matrix(
@@ -2111,16 +2150,17 @@ struct HiggsAudioCodecDecoderRuntime::Impl {
 
     runtime::AudioBuffer decode_chunked(const HiggsAudioCodeMatrix & codes) {
         const int64_t samples_per_frame = product(weights->config().upsampling_ratios);
-        int64_t chunk_frames = std::min<int64_t>(kCodecDecodeFallbackFrames, codes.frames);
+        int64_t chunk_frames = std::min<int64_t>(codec_decode_fallback_frames(), codes.frames);
+        const int64_t configured_overlap = codec_decode_fallback_overlap_frames();
         std::string last_error;
-        while (chunk_frames >= 32) {
+        while (chunk_frames >= kCodecDecodeFallbackMinFrames) {
             try {
                 runtime::AudioBuffer merged;
                 graph.reset();
                 for (int64_t start = 0; start < codes.frames; start += chunk_frames) {
                     const int64_t keep_frames = std::min<int64_t>(chunk_frames, codes.frames - start);
                     const int64_t overlap = std::min<int64_t>(
-                        kCodecDecodeFallbackOverlapFrames,
+                        configured_overlap,
                         std::max<int64_t>(0, chunk_frames / 4));
                     const int64_t begin = std::max<int64_t>(0, start - overlap);
                     const int64_t end = std::min<int64_t>(codes.frames, start + keep_frames + overlap);
@@ -2141,13 +2181,17 @@ struct HiggsAudioCodecDecoderRuntime::Impl {
                 }
                 graph.reset();
                 debug::trace_log_scalar("higgs_tts.codec.chunked_decode_frames", chunk_frames);
+                debug::trace_log_scalar("higgs_tts.codec.chunked_decode_overlap_frames", configured_overlap);
                 return merged;
             } catch (const std::runtime_error & error) {
-                if (!is_codec_graph_allocation_failure(error)) {
+                if (!is_codec_graph_retryable_failure(error)) {
                     throw;
                 }
                 last_error = error.what();
                 graph.reset();
+                if (chunk_frames == kCodecDecodeFallbackMinFrames) {
+                    break;
+                }
                 chunk_frames /= 2;
             }
         }
@@ -2159,11 +2203,12 @@ struct HiggsAudioCodecDecoderRuntime::Impl {
         try {
             return decode_with_current_graph(codes);
         } catch (const std::runtime_error & error) {
-            if (!is_codec_graph_allocation_failure(error)) {
+            if (!is_codec_graph_retryable_failure(error)) {
                 throw;
             }
             debug::trace_log_scalar("higgs_tts.codec.chunked_decode_fallback", 1);
             debug::trace_log_scalar("higgs_tts.codec.chunked_decode_original_frames", codes.frames);
+            debug::trace_log_scalar("higgs_tts.codec.chunked_decode_initial_frames", codec_decode_fallback_frames());
             graph.reset();
             return decode_chunked(codes);
         }
