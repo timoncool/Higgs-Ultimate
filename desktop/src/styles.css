@@ -2154,3 +2154,11 @@ input[type="range"]::-moz-range-thumb {
   animation: pulse 1s ease-in-out infinite;
 }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Mic recording */
+.record-row { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.compact-button.recording {
+  background: #c0392b; border-color: #c0392b; color: #fff;
+  animation: rec-pulse 1.1s ease-in-out infinite;
+}
+@keyframes rec-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.62; } }

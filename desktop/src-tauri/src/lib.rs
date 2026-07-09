@@ -2,6 +2,7 @@ mod audio;
 mod download;
 mod engine;
 mod parakeet;
+mod recorder;
 
 use engine::{
     AudioChunkCallback, AudioResult, Engine, EngineError, GenerateRequest, LoadModelRequest,
@@ -1289,6 +1290,12 @@ async fn transcribe_audio(
     .map_err(|e| format!("task join error: {e}"))??;
 
     Ok(serde_json::json!({ "text": text }))
+}
+
+/// Drop the warm Parakeet model from RAM (reloaded lazily next time).
+#[tauri::command]
+fn unload_asr() {
+    parakeet::unload();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3903,6 +3910,9 @@ pub fn run() {
             generate_voice_clone,
             generate_finish_sentence,
             transcribe_audio,
+            unload_asr,
+            recorder::start_recording,
+            recorder::stop_recording,
             list_models,
             download_model,
             download_control,

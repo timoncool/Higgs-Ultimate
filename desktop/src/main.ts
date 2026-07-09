@@ -1918,43 +1918,17 @@ function initDropzones(): void {
     hideRefPreview("gallery");
   };
 
-  setupDropzone("#clone-dropzone", async (path, name) => {
-    const prepared = await prepareReferenceAudioFile(path, name);
-    cloneRefPath = prepared.path;
-    clonePersonaId = "";
-    cloneRefName = prepared.name;
-    setDropzoneFile("#clone-dropzone", prepared.name);
-    showRefPreview("clone", prepared.path);
-  }, clearClone);
-  setupDropzone("#finish-dropzone", (path, name) => {
-    finishRefPath = path;
-    finishPersonaId = "";
-    finishRefName = name;
-    setDropzoneFile("#finish-dropzone", name);
-    showRefPreview("finish", path);
-  }, clearFinish);
+  setupDropzone("#clone-dropzone", applyCloneReference, clearClone);
+  wireRecordButton("#clone-record-btn", applyCloneReference);
+  setupDropzone("#finish-dropzone", applyFinishReference, clearFinish);
   setupDropzone("#speaker-gallery-dropzone", (path, name) => {
-    void (async () => {
-      let persona = selectedGalleryPersona();
-      if (!persona) {
-        persona = createBlankPersona();
-        speakerPersonas.push(persona);
-        selectedGalleryPersonaId = persona.id;
-      }
-      const prepared = await prepareReferenceAudioFile(path, name);
-      if (!persona.name || /^Speaker \d+$/.test(persona.name)) {
-        persona.name = personaNameFromPath(name || path);
-      }
-      const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
-      persona.refPath = stored.path;
-      persona.refName = prepared.name || stored.fileName;
-      persona.cachePath = "";
-      await ensureSpeakerCachePath(persona);
-      persona.updatedAt = Date.now();
-      saveSpeakerPersonas();
-      showRefPreview("gallery", persona.refPath);
-    })().catch((e) => showToast(`Reference copy failed: ${e}`, "error"));
+    void applyGalleryReference(path, name).catch((e) => showToast(`Reference copy failed: ${e}`, "error"));
   }, clearGallery);
+
+  // Mic recording on every reference spot that offers a voice choice.
+  wireRecordButton("#finish-record-btn", applyFinishReference);
+  wireRecordButton("#gallery-record-btn", (path, name) =>
+    applyGalleryReference(path, name).catch((e) => showToast(`Reference copy failed: ${e}`, "error")));
 }
 
 async function setGalleryPhotoFromPath(imagePath: string): Promise<void> {
@@ -2057,6 +2031,85 @@ async function prepareReferenceAudioFile(path: string, name?: string): Promise<{
 async function pickReferenceAudioFile(): Promise<{ path: string; name: string; cropped: boolean } | null> {
   const file = await pickAudioFile();
   return file ? prepareReferenceAudioFile(file.path, file.name) : null;
+}
+
+// ── Reference appliers (shared by drag-drop, browse and mic recording) ──
+async function applyCloneReference(path: string, name: string): Promise<void> {
+  const prepared = await prepareReferenceAudioFile(path, name);
+  cloneRefPath = prepared.path;
+  clonePersonaId = "";
+  cloneRefName = prepared.name;
+  setDropzoneFile("#clone-dropzone", prepared.name);
+  showRefPreview("clone", prepared.path);
+}
+
+function applyFinishReference(path: string, name: string): void {
+  finishRefPath = path;
+  finishPersonaId = "";
+  finishRefName = name;
+  setDropzoneFile("#finish-dropzone", name);
+  showRefPreview("finish", path);
+}
+
+async function applyGalleryReference(path: string, name: string): Promise<void> {
+  let persona = selectedGalleryPersona();
+  if (!persona) {
+    persona = createBlankPersona();
+    speakerPersonas.push(persona);
+    selectedGalleryPersonaId = persona.id;
+  }
+  const prepared = await prepareReferenceAudioFile(path, name);
+  if (!persona.name || /^Speaker \d+$/.test(persona.name)) {
+    persona.name = personaNameFromPath(name || path);
+  }
+  const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
+  persona.refPath = stored.path;
+  persona.refName = prepared.name || stored.fileName;
+  persona.cachePath = "";
+  await ensureSpeakerCachePath(persona);
+  persona.updatedAt = Date.now();
+  saveSpeakerPersonas();
+  showRefPreview("gallery", persona.refPath);
+}
+
+// Native mic recording (cpal in Rust). Toggle on the button; on stop, hand the
+// recorded WAV to `onWav` — the same path the drag-drop/browse flows use, so
+// Parakeet auto-transcription runs exactly as for an uploaded reference.
+let activeRecordButton: string | null = null;
+let recordingSpeakerId: string | null = null;
+function wireRecordButton(
+  btnId: string,
+  onWav: (path: string, name: string) => void | Promise<void>,
+): void {
+  const btn = document.querySelector<HTMLButtonElement>(btnId);
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const isRecording = activeRecordButton === btnId;
+    if (!isRecording) {
+      if (activeRecordButton) {
+        showToast("Already recording — stop it first", "warning");
+        return;
+      }
+      try {
+        await invoke("start_recording");
+        activeRecordButton = btnId;
+        btn.textContent = t("⏹ Stop");
+        btn.classList.add("recording");
+      } catch (e) {
+        showToast(`Microphone error: ${e}`, "error");
+      }
+    } else {
+      activeRecordButton = null;
+      btn.textContent = t("🎤 Record voice");
+      btn.classList.remove("recording");
+      try {
+        const wavPath = await invoke<string>("stop_recording");
+        await onWav(wavPath, "recording.wav");
+      } catch (e) {
+        showToast(`Recording failed: ${e}`, "error");
+      }
+    }
+  });
 }
 
 async function pickImageFile(): Promise<string | null> {
@@ -2839,6 +2892,9 @@ function renderMultiSpeakers(): void {
         <div class="dropzone mini-dropzone ${speaker.refName ? "has-file" : ""}" data-action="pick-speaker-audio">
           ${multiDropzoneMarkup(speaker.refName, "Drop reference voice, or click to browse")}
         </div>
+        <div class="record-row">
+          <button class="compact-button ${recordingSpeakerId === speaker.id ? "recording" : ""}" data-action="record-speaker" type="button">${recordingSpeakerId === speaker.id ? t("⏹ Stop") : t("🎤 Record voice")}</button>
+        </div>
         <label class="field-label transcript-label">Reference transcript</label>
         <textarea class="text-area" data-field="speaker-transcript" rows="2" placeholder="Optional. Auto-filled with Parakeet when available.">${escapeHtml(speaker.refText)}</textarea>
         <label class="inline-toggle reference-normalize-toggle">
@@ -3183,6 +3239,31 @@ function initMultiSpeakerWorkflow(): void {
         speaker.personaId = "";
         speaker.cachePath = "";
         renderMultiSpeakers();
+      }
+    } else if (action === "record-speaker") {
+      if (recordingSpeakerId === speaker.id) {
+        recordingSpeakerId = null;
+        try {
+          const wav = await invoke<string>("stop_recording");
+          const prepared = await prepareReferenceAudioFile(wav, "recording.wav");
+          speaker.refPath = prepared.path;
+          speaker.refName = prepared.name;
+          speaker.personaId = "";
+          speaker.cachePath = "";
+        } catch (e) {
+          showToast(`Recording failed: ${e}`, "error");
+        }
+        renderMultiSpeakers();
+      } else if (recordingSpeakerId || activeRecordButton) {
+        showToast("Already recording — stop it first", "warning");
+      } else {
+        try {
+          await invoke("start_recording");
+          recordingSpeakerId = speaker.id;
+          renderMultiSpeakers();
+        } catch (e) {
+          showToast(`Microphone error: ${e}`, "error");
+        }
       }
     } else if (action === "clear-audio") {
       speaker.refPath = null;

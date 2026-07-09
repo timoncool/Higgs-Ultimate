@@ -377,6 +377,9 @@ export const RU: Record<string, string> = {
   "That speaker identity has no reference audio": "У этого голоса нет референс-аудио",
   "Use lines like [Speaker1] text to import a script": "Используйте строки вида [Speaker1] текст для импорта сценария",
   "Whisper model downloaded": "Модель Whisper скачана",
+  "🎤 Record voice": "🎤 Записать голос",
+  "or record your own voice with the microphone": "или запишите свой голос с микрофона",
+  "Record voice": "Записать голос",
   "Standard voices already imported": "Стандартные голоса уже добавлены",
 
   // ── Dynamically rendered cards (multi-speaker, gallery, queue) ──

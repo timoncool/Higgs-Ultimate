@@ -13,6 +13,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Native microphone capture (cpal) + WAV writing (hound) for the in-app
+# "record your voice" reference — the reliable path on desktop (WebView2
+# getUserMedia is flaky). Same crates the Tauri recorder plugins use.
+cpal = "0.15"
+hound = "3.5"
 libloading = "0.8"
 nvml-wrapper = "0.10"
 serde = { version = "1", features = ["derive"] }
