@@ -202,31 +202,23 @@ fn engine_package_base_url(url: &str) -> String {
     trimmed.to_string()
 }
 
-fn default_engine_download_dir() -> PathBuf {
-    if cfg!(windows) {
-        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-            return PathBuf::from(local_app_data)
-                .join("Higgs Audio v3 Studio")
-                .join("engine");
-        }
-    }
-
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
+/// Portable data root: the directory that contains the executable. Everything
+/// the app writes (models, speakers, engine, whisper, webview state) lives here
+/// so the whole folder can be moved or deleted without leaving anything behind
+/// in the user profile. Replaces the old `~/audiocpp` layout.
+fn app_root_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".higgs-audio-v3-studio")
-        .join("engine")
 }
 
-fn user_home_dir() -> PathBuf {
-    std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."))
+fn default_engine_download_dir() -> PathBuf {
+    app_root_dir().join("resources").join("engine")
 }
 
 fn user_models_root() -> PathBuf {
-    user_home_dir().join("audiocpp").join("models")
+    app_root_dir().join("models")
 }
 
 fn resolve_download_dest_dir(dest_dir: &str) -> PathBuf {
@@ -246,8 +238,10 @@ fn resolve_download_dest_dir(dest_dir: &str) -> PathBuf {
         .unwrap_or(false);
 
     if starts_with_models {
-        user_home_dir().join("audiocpp").join(path)
+        // "models/<folder>/<file>" -> <app>/models/<folder>/<file>
+        app_root_dir().join(path)
     } else {
+        // bare relative path -> <app>/models/<...>
         user_models_root().join(path)
     }
 }
@@ -3114,12 +3108,9 @@ fn safe_file_part(value: &str) -> String {
     }
 }
 
-fn speaker_store_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("speakers");
+fn speaker_store_root(_app: &AppHandle) -> Result<PathBuf, String> {
+    // Portable: keep speaker personas next to the executable instead of %APPDATA%.
+    let root = app_root_dir().join("speakers");
     std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     Ok(root)
 }
@@ -3135,6 +3126,115 @@ fn speaker_cache_file(app: &AppHandle, id: &str, name: &str) -> Result<PathBuf, 
     let dir = speaker_dir(app, id, name)?.join("cache");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("speaker.hspkcache"))
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Standard voice pack (Nerual Dreming) — reference-audio + transcript pairs
+// downloaded from Hugging Face and imported into the Speaker Gallery.
+// ───────────────────────────────────────────────────────────────────────────
+
+const VOICEPACK_URL: &str =
+    "https://huggingface.co/datasets/nerualdreming/VibeVoice/resolve/main/voice-pack.zip";
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoicePackVoice {
+    name: String,
+    audio_path: String,
+    text: String,
+}
+
+fn collect_voicepack_voices(root: &Path) -> Vec<VoicePackVoice> {
+    let mut voices = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase())
+                .unwrap_or_default();
+            if !matches!(ext.as_str(), "wav" | "mp3" | "flac") {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("voice")
+                .to_string();
+            // Matching transcript sidecar: "<stem>.lab" or "<stem>.txt".
+            let mut text = String::new();
+            for sidecar in ["lab", "txt"] {
+                let t_path = path.with_extension(sidecar);
+                if let Ok(content) = std::fs::read_to_string(&t_path) {
+                    text = content.trim().to_string();
+                    break;
+                }
+            }
+            voices.push(VoicePackVoice {
+                name,
+                audio_path: path.to_string_lossy().into_owned(),
+                text,
+            });
+        }
+    }
+    voices.sort_by(|a, b| a.name.cmp(&b.name));
+    voices
+}
+
+/// Download (once) and extract the standard voice pack, returning the list of
+/// voices so the frontend can turn each into a Speaker Gallery persona.
+#[tauri::command]
+fn download_voicepack(force: Option<bool>) -> Result<Vec<VoicePackVoice>, String> {
+    use std::io::Write as _;
+    let force = force.unwrap_or(false);
+    let root = app_root_dir();
+    let voicepack_dir = root.join("voicepack");
+
+    if !force {
+        let existing = collect_voicepack_voices(&voicepack_dir);
+        if !existing.is_empty() {
+            return Ok(existing);
+        }
+    }
+
+    let downloads = root.join("downloads");
+    std::fs::create_dir_all(&downloads).map_err(|e| e.to_string())?;
+    let zip_path = downloads.join("voice-pack.zip");
+
+    if force || !zip_path.exists() {
+        let response = ureq::get(VOICEPACK_URL)
+            .call()
+            .map_err(|e| format!("voice-pack download failed: {e}"))?;
+        let mut reader = response.into_body().into_reader();
+        let file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
+        let mut writer = std::io::BufWriter::new(file);
+        std::io::copy(&mut reader, &mut writer).map_err(|e| e.to_string())?;
+        writer.flush().map_err(|e| e.to_string())?;
+    }
+
+    std::fs::create_dir_all(&voicepack_dir).map_err(|e| e.to_string())?;
+    let file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("voice-pack is not a valid zip: {e}"))?;
+    archive
+        .extract(&voicepack_dir)
+        .map_err(|e| format!("voice-pack extract failed: {e}"))?;
+
+    let voices = collect_voicepack_voices(&voicepack_dir);
+    if voices.is_empty() {
+        return Err("voice-pack contained no audio files".into());
+    }
+    Ok(voices)
 }
 
 fn add_zip_file<W: Write + Seek>(
@@ -3707,6 +3807,15 @@ fn cancel_active_generation(app: &AppHandle) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 pub fn run() {
+    // Portable: keep WebView2 state (localStorage settings) inside the app folder.
+    // WebView2 honours this env var when the host does not set an explicit folder.
+    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+        std::env::set_var(
+            "WEBVIEW2_USER_DATA_FOLDER",
+            app_root_dir().join("webview-data"),
+        );
+    }
+
     let engine_dir = default_engine_download_dir();
 
     tauri::Builder::default()
@@ -3796,6 +3905,7 @@ pub fn run() {
             save_text_file,
             read_text_file,
             store_speaker_asset,
+            download_voicepack,
             speaker_cache_path,
             write_speaker_metadata,
             export_speaker_zip,

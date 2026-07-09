@@ -1,8 +1,14 @@
 import type { TtsModelPreset, WhisperModelPreset } from "./types";
 
 export const APP_VERSION = "0.2.4";
+// Original author (engine + upstream app) — credit preserved in the UI footer.
 export const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
-export const RELEASES_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio/releases";
+// This Russian portable fork.
+export const FORK_URL = "https://github.com/timoncool/Higgs-Audio-v3-Studio-rus";
+export const RELEASES_URL = `${FORK_URL}/releases`;
+// Portable-build authors.
+export const NERUAL_DREMING_URL = "https://t.me/nerual_dreming";
+export const NEUROPORT_URL = "https://t.me/neuroport";
 export const CUDA_DOWNLOAD_URL = "https://developer.nvidia.com/cuda-downloads";
 export const NVIDIA_DRIVER_URL = "https://www.nvidia.com/Download/index.aspx";
 export const VC_REDIST_X64_URL = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
@@ -13,7 +19,9 @@ export const ENGINE_DLL_URL = `${ENGINE_PACKAGE_URL}/audiocpp_engine.dll`;
 export const WHISPER_MODELS_URL = "https://huggingface.co/ggerganov/whisper.cpp";
 export const WHISPER_MODEL_TREE_URL = `${WHISPER_MODELS_URL}/tree/main`;
 export const WHISPER_MODEL_RESOLVE_BASE = `${WHISPER_MODELS_URL}/resolve/main`;
-export const WHISPER_RECOMMENDED_MODEL = "base.en-q8_0";
+// Multilingual default (not the English-only .en models) so voice-clone
+// auto-transcription works for Russian and other languages.
+export const WHISPER_RECOMMENDED_MODEL = "large-v3-turbo-q5_0";
 export const SPEAKER_PERSONA_STORAGE_KEY = "higgsAudio.speakerPersonas";
 export const MODEL_PATH_STORAGE_KEY = "higgsAudio.selectedModelPath";
 export const ENGINE_PATH_STORAGE_KEY = "higgsAudio.selectedEnginePath";
@@ -80,9 +88,9 @@ export const WHISPER_MODEL_PRESETS: WhisperModelPreset[] = [
   { id: "base", size: "142 MiB", sha: "465707469ff3a37a2b9b8d8f89f2f99de7299dac" },
   { id: "base-q5_1", size: "57 MiB", sha: "a3733eda680ef76256db5fc5dd9de8629e62c5e7" },
   { id: "base-q8_0", size: "78 MiB", sha: "7bb89bb49ed6955013b166f1b6a6c04584a20fbe" },
-  { id: "base.en", size: "142 MiB", sha: "137c40403d78fd54d454da0f9bd998f78703390c", recommended: true },
+  { id: "base.en", size: "142 MiB", sha: "137c40403d78fd54d454da0f9bd998f78703390c" },
   { id: "base.en-q5_1", size: "57 MiB", sha: "d26d7ce5a1b6e57bea5d0431b9c20ae49423c94a" },
-  { id: "base.en-q8_0", size: "78 MiB", sha: "bb1574182e9b924452bf0cd1510ac034d323e948", recommended: true },
+  { id: "base.en-q8_0", size: "78 MiB", sha: "bb1574182e9b924452bf0cd1510ac034d323e948" },
   { id: "small", size: "466 MiB", sha: "55356645c2b361a969dfd0ef2c5a50d530afd8d5" },
   { id: "small-q5_1", size: "181 MiB", sha: "6fe57ddcfdd1c6b07cdcc73aaf620810ce5fc771" },
   { id: "small-q8_0", size: "252 MiB", sha: "bcad8a2083f4e53d648d586b7dbc0cd673d8afad" },

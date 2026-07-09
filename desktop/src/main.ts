@@ -1,4 +1,5 @@
 import "./styles.css";
+import { getLang, setLang, t, translateStaticDom } from "./i18n";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -13,6 +14,8 @@ import {
   ENGINE_PATH_STORAGE_KEY,
   FIRST_RUN_WIZARD_STORAGE_KEY,
   GITHUB_URL,
+  NERUAL_DREMING_URL,
+  NEUROPORT_URL,
   HIGGS_MODEL_ASSET_FILES,
   HIGGS_MODEL_PRESETS,
   HIGGS_MODEL_RESOLVE_BASE,
@@ -160,6 +163,14 @@ let hardwareScrubDrag: { startX: number; startOffset: number } | null = null;
 let hardwareHover: { x: number; idx: number } | null = null;
 
 const audioPlayer = el<HTMLAudioElement>("#audio-player");
+
+// Output playback volume (0..1). Applied to the final <audio> element and, for
+// the live-stream preview, mixed into the PCM buffer in processLiveStreamAudio.
+const OUTPUT_VOLUME_STORAGE_KEY = "higgsAudio.outputVolume";
+let outputVolume = (() => {
+  const saved = Number(localStorage.getItem(OUTPUT_VOLUME_STORAGE_KEY));
+  return Number.isFinite(saved) && saved >= 0 && saved <= 1 ? saved : 1;
+})();
 
 let speakerPersonas: SpeakerPersona[] = [];
 const multiSpeakers: MultiSpeaker[] = [];
@@ -641,6 +652,13 @@ function initSettings(): void {
     }
   });
 
+  const langRu = el<HTMLButtonElement>("#lang-ru");
+  const langEn = el<HTMLButtonElement>("#lang-en");
+  langRu.classList.toggle("active", getLang() === "ru");
+  langEn.classList.toggle("active", getLang() === "en");
+  langRu.addEventListener("click", () => { if (getLang() !== "ru") setLang("ru"); });
+  langEn.addEventListener("click", () => { if (getLang() !== "en") setLang("en"); });
+
   el("#theme-dark").addEventListener("click", () => applyTheme("dark"));
   el("#theme-light").addEventListener("click", () => applyTheme("light"));
   for (const accentBtn of document.querySelectorAll<HTMLButtonElement>("[data-accent-choice]")) {
@@ -684,6 +702,10 @@ function initExternalLinks(): void {
   setText("#version-link", `v${APP_VERSION}`);
   el("#github-link").addEventListener("click", () => openExternalUrl(GITHUB_URL));
   el("#version-link").addEventListener("click", () => openExternalUrl(RELEASES_URL));
+  const nerual = document.querySelector<HTMLButtonElement>("#nerual-link");
+  if (nerual) nerual.addEventListener("click", () => openExternalUrl(NERUAL_DREMING_URL));
+  const neuroport = document.querySelector<HTMLButtonElement>("#neuroport-link");
+  if (neuroport) neuroport.addEventListener("click", () => openExternalUrl(NEUROPORT_URL));
 }
 
 function ttsPresetUrl(preset: TtsModelPreset): string {
@@ -1321,9 +1343,12 @@ async function refreshModelList(): Promise<void> {
     for (const m of sortedModels) {
       const opt = document.createElement("option");
       const recommended = isRecommendedTtsModel(m);
+      const incomplete = m.hasConfig === false;
       opt.value = m.path;
-      opt.textContent = `${recommended ? "★ " : ""}${modelDisplayName(m)}${recommended ? " · recommended" : ""} (${m.format}, ${formatBytes(m.sizeBytes)})`;
-      opt.title = m.name;
+      opt.textContent = `${recommended ? "★ " : ""}${modelDisplayName(m)}${recommended ? " · recommended" : ""} (${m.format}, ${formatBytes(m.sizeBytes)})${incomplete ? " · ⚠ incomplete" : ""}`;
+      opt.title = incomplete
+        ? `${m.name} — missing config.json / tokenizer files. Re-download the full model folder.`
+        : m.name;
       select.appendChild(opt);
     }
     if (currentVal && models.some((m) => m.path === currentVal)) {
@@ -1359,9 +1384,9 @@ async function doLoadEngine(libraryPath?: string): Promise<void> {
     if (result.success) {
       if (libPath) localStorage.setItem(ENGINE_PATH_STORAGE_KEY, libPath);
       engineSupportsStreaming = Boolean(result.supportsStreaming);
-      setText("#engine-chip", "Engine loaded");
+      setText("#engine-chip", t("Engine loaded"));
       el<HTMLElement>("#engine-chip").classList.add("active");
-      showToast("Engine loaded");
+      showToast(t("Engine loaded"));
       await refreshModelList();
     }
   } catch (e) {
@@ -1394,7 +1419,7 @@ async function doLoadModel(): Promise<void> {
   }
   try {
     el<HTMLButtonElement>("#load-model-btn").disabled = true;
-    setText("#model-state", "Loading…");
+    setText("#model-state", t("Loading…"));
     const result = await invoke<{ success: boolean; modelInfo: { family: string; displayName: string; weightType: string } }>(
       "load_model",
       {
@@ -1411,7 +1436,7 @@ async function doLoadModel(): Promise<void> {
     if (result.success) {
       const info = result.modelInfo;
       const uiName = selectedModelUiName();
-      setText("#model-state", "Loaded");
+      setText("#model-state", t("Loaded"));
       el("#model-state").classList.add("ok");
       setText("#model-chip", `${uiName} (${info.weightType || "default"})`);
       el("#model-chip").classList.remove("muted");
@@ -1420,7 +1445,7 @@ async function doLoadModel(): Promise<void> {
       showToast(`Model loaded: ${uiName}`);
     }
   } catch (e) {
-    setText("#model-state", "Error");
+    setText("#model-state", t("Error"));
     showToast(`Failed to load model: ${e}`, "error");
   } finally {
     el<HTMLButtonElement>("#load-model-btn").disabled = false;
@@ -1430,9 +1455,9 @@ async function doLoadModel(): Promise<void> {
 async function doUnloadModel(): Promise<void> {
   try {
     await invoke("unload_model");
-    setText("#model-state", "Not loaded");
+    setText("#model-state", t("Not loaded"));
     el("#model-state").classList.remove("ok");
-    setText("#model-chip", "No model");
+    setText("#model-chip", t("No model"));
     el("#model-chip").classList.add("muted");
     el("#model-chip").classList.remove("active");
     el<HTMLButtonElement>("#unload-model-btn").disabled = true;
@@ -2219,6 +2244,49 @@ function selectedGalleryPersona(): SpeakerPersona | undefined {
   return findPersona(selectedGalleryPersonaId);
 }
 
+type VoicePackVoice = { name: string; audioPath: string; text: string };
+
+// Download the standard Nerual Dreming voice pack and add every voice to the
+// Speaker Gallery as a persona (reference audio + transcript). Idempotent:
+// voices whose name already exists are skipped.
+async function importStandardVoicePack(): Promise<void> {
+  const btn = document.querySelector<HTMLButtonElement>("#speaker-voicepack-btn");
+  if (btn) btn.disabled = true;
+  showToast("Downloading standard voice pack…");
+  try {
+    const voices = await invoke<VoicePackVoice[]>("download_voicepack", { force: false });
+    const existing = new Set(speakerPersonas.map((p) => p.name.trim().toLowerCase()));
+    let added = 0;
+    for (const voice of voices) {
+      const key = voice.name.trim().toLowerCase();
+      if (!key || existing.has(key)) continue;
+      try {
+        const persona = createBlankPersona();
+        persona.name = voice.name;
+        const prepared = await prepareReferenceAudioFile(voice.audioPath, voice.name);
+        const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
+        persona.refPath = stored.path;
+        persona.refName = prepared.name || stored.fileName;
+        persona.refText = voice.text;
+        persona.cachePath = "";
+        persona.updatedAt = Date.now();
+        speakerPersonas.push(persona);
+        existing.add(key);
+        added += 1;
+      } catch (e) {
+        console.warn(`Voice-pack import failed for ${voice.name}`, e);
+      }
+    }
+    saveSpeakerPersonas();
+    renderSpeakerPersonaUi();
+    showToast(added > 0 ? `Standard voices added: ${added}` : "Standard voices already imported");
+  } catch (e) {
+    showToast(`Voice pack failed: ${e}`, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 function createBlankPersona(): SpeakerPersona {
   const now = Date.now();
   return {
@@ -2489,6 +2557,9 @@ function initSpeakerPersonas(): void {
     selectedGalleryPersonaId = persona.id;
     saveSpeakerPersonas();
     switchMode("speakers");
+  });
+  el("#speaker-voicepack-btn").addEventListener("click", () => {
+    void importStandardVoicePack();
   });
   el("#speaker-import-btn").addEventListener("click", () => {
     void openImport().catch((e) => showToast(`Import failed: ${e}`, "error"));
@@ -3427,10 +3498,13 @@ function updateGenerationControls(): void {
   const modeCanGenerate = isGenerationMode(currentMode);
   const isUtility = currentMode === "history" || currentMode === "api" || currentMode === "speakers";
   const generateBtn = el<HTMLButtonElement>("#generate-btn");
+  const batchBtn = el<HTMLButtonElement>("#batch-btn");
   const queueBtn = el<HTMLButtonElement>("#queue-btn");
   const cancelBtn = el<HTMLButtonElement>("#cancel-btn");
+  const modeSupportsBatch = currentMode === "tts" || currentMode === "clone";
   el<HTMLElement>("#action-row").classList.toggle("hidden", isUtility || !modeCanGenerate);
   generateBtn.classList.toggle("hidden", isGenerating || !modeCanGenerate);
+  batchBtn.classList.toggle("hidden", isGenerating || !modeSupportsBatch);
   queueBtn.classList.toggle("hidden", !isGenerating || !modeCanGenerate);
   cancelBtn.classList.toggle("hidden", !isGenerating || activeGenerationJob?.mode !== currentMode);
   el<HTMLElement>("#progress-section").classList.toggle(
@@ -3528,7 +3602,7 @@ function jobLabel(job: GenerationJob): string {
   return payload.lines.map((line) => line.text.trim()).filter(Boolean).join(" / ").slice(0, 48) || "Multi speaker";
 }
 
-function captureCurrentGenerationJob(): GenerationJob {
+function captureCurrentGenerationJob(overrideText?: string): GenerationJob {
   if (!isGenerationMode(currentMode)) {
     throw new Error("This tab cannot generate audio");
   }
@@ -3536,11 +3610,11 @@ function captureCurrentGenerationJob(): GenerationJob {
   const deliveryPrefix = deliveryControlPrefix();
   let payload: GenerationJob["payload"];
   if (currentMode === "tts") {
-    const text = el<HTMLTextAreaElement>("#tts-text").value.trim();
+    const text = (overrideText ?? el<HTMLTextAreaElement>("#tts-text").value).trim();
     if (!text) throw new Error("Please enter text to speak");
     payload = { kind: "tts", text };
   } else if (currentMode === "clone") {
-    const text = el<HTMLTextAreaElement>("#clone-text").value.trim();
+    const text = (overrideText ?? el<HTMLTextAreaElement>("#clone-text").value).trim();
     if (!text) throw new Error("Please enter text to speak");
     if (!cloneRefPath) throw new Error("Please provide a reference voice");
     payload = {
@@ -3927,6 +4001,56 @@ async function doGenerate(): Promise<void> {
   }
 }
 
+// Batch mode: split the current text field into lines and generate each line
+// as a separate clip via the existing generation queue. Works in Text-to-Speech
+// and Voice Clone modes (one voice/settings, many lines). Each clip lands in
+// History with its own player and save button.
+function batchTextForMode(): string | null {
+  if (currentMode === "tts") return el<HTMLTextAreaElement>("#tts-text").value;
+  if (currentMode === "clone") return el<HTMLTextAreaElement>("#clone-text").value;
+  return null;
+}
+
+async function doBatchGenerate(): Promise<void> {
+  const raw = batchTextForMode();
+  if (raw === null) {
+    showToast("Batch works in the Text to Speech and Voice Clone tabs", "warning");
+    return;
+  }
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    showToast("Please enter text to speak (one clip per line)", "warning");
+    return;
+  }
+  if (lines.length === 1) {
+    await doGenerate();
+    return;
+  }
+  let jobs: GenerationJob[];
+  try {
+    jobs = lines.map((line) => captureCurrentGenerationJob(line));
+  } catch (e) {
+    showToast(String(e), "warning");
+    return;
+  }
+  if (isGenerating) {
+    generationQueue.push(...jobs);
+    renderQueuePanel();
+    updateGenerationControls();
+    showToast(`Batch queued: ${jobs.length} clips`);
+    return;
+  }
+  const [first, ...rest] = jobs;
+  generationQueue.push(...rest);
+  renderQueuePanel();
+  updateGenerationControls();
+  showToast(`Batch: generating ${jobs.length} clips`);
+  await runGenerationJob(first);
+}
+
 async function doCancel(): Promise<void> {
   if (!isGenerating || !activeGenerationJob) return;
   cancelRequested = true;
@@ -3946,6 +4070,7 @@ async function doCancel(): Promise<void> {
 
 function initGenerate(): void {
   el("#generate-btn").addEventListener("click", doGenerate);
+  el("#batch-btn").addEventListener("click", () => void doBatchGenerate());
   el("#queue-btn").addEventListener("click", enqueueCurrentGenerationJob);
   el("#cancel-btn").addEventListener("click", doCancel);
   el("#queue-clear-btn").addEventListener("click", () => {
@@ -4053,7 +4178,7 @@ function processLiveStreamAudio(event: AudioProcessingEvent): void {
       const sourceChannel = stream.channels === 1 ? 0 : Math.min(outChannel, stream.channels - 1);
       const a = stream.pcm[baseFrame * stream.channels + sourceChannel] || 0;
       const b = stream.pcm[nextFrame * stream.channels + sourceChannel] || a;
-      outputs[outChannel][outFrame] = a + (b - a) * frac;
+      outputs[outChannel][outFrame] = (a + (b - a) * frac) * outputVolume;
     }
     stream.playbackFrame += rateRatio;
   }
@@ -4405,6 +4530,22 @@ function setSaveFormat(format: SaveFormat): void {
 function initAudioPlayer(): void {
   const playBtn = el<HTMLButtonElement>("#play-btn");
 
+  const volumeSlider = el<HTMLInputElement>("#output-volume");
+  const volumeIcon = document.querySelector<HTMLElement>("#output-volume-icon");
+  const applyVolume = (value: number): void => {
+    outputVolume = Math.min(1, Math.max(0, value));
+    audioPlayer.volume = outputVolume;
+    if (volumeIcon) {
+      volumeIcon.textContent = outputVolume === 0 ? "🔇" : outputVolume < 0.5 ? "🔉" : "🔊";
+    }
+  };
+  volumeSlider.value = String(Math.round(outputVolume * 100));
+  applyVolume(outputVolume);
+  volumeSlider.addEventListener("input", () => {
+    applyVolume(Number(volumeSlider.value) / 100);
+    localStorage.setItem(OUTPUT_VOLUME_STORAGE_KEY, String(outputVolume));
+  });
+
   playBtn.addEventListener("click", async () => {
     if (liveStream) {
       if (liveStream.playing) {
@@ -4591,6 +4732,14 @@ function modelDownloadTarget(url: string): { destDir: string; filename: string |
   return { destDir: "models", filename: null };
 }
 
+// Base URL (folder) of a file URL — used to fetch sibling config/tokenizer
+// assets that live next to a pasted .gguf weight file.
+function modelBaseUrl(url: string): string | null {
+  const clean = url.split("?")[0];
+  const idx = clean.lastIndexOf("/");
+  return idx > 0 ? clean.slice(0, idx) : null;
+}
+
 function updateDownloadIndicator(status: DownloadProgressEvent["status"] = downloadPaused ? "paused" : "running"): void {
   const button = document.querySelector<HTMLButtonElement>("#download-status-button");
   if (button) {
@@ -4634,15 +4783,15 @@ function initDownload(): void {
     activeDownloadKind = kind;
     const whisperPreset = selectedWhisperPreset();
     title.textContent = kind === "whisper"
-      ? "Download Whisper Model"
+      ? t("Download Whisper Model")
       : kind === "engine"
-        ? "Download Engine DLLs"
-        : "Download Model";
+        ? t("Download Engine DLLs")
+        : t("Download Model");
     urlInput.placeholder = kind === "whisper"
-      ? "Paste whisper.cpp ggml .bin URL…"
+      ? t("Paste whisper.cpp ggml .bin URL…")
       : kind === "engine"
-        ? "Engine package URL…"
-        : "Paste HuggingFace GGUF URL…";
+        ? t("Engine package URL…")
+        : t("Paste HuggingFace GGUF URL…");
     presetRow.classList.toggle("hidden", kind !== "model");
     if (kind === "whisper") {
       urlInput.value = whisperPresetUrl(whisperPreset);
@@ -4701,10 +4850,37 @@ function initDownload(): void {
           showToast(`${preset.label} folder downloaded`);
         } else {
           const target = modelDownloadTarget(url);
-          await invoke<{ path: string; size: number }>("download_model", {
-            request: { url, destDir: target.destDir, filename: target.filename },
-          });
-          showToast("Download complete");
+          // Always fetch the WHOLE model folder, not just the .gguf. The engine
+          // needs config.json + the tokenizer files next to the weights or it
+          // fails to load with "missing config". A pasted GGUF URL that doesn't
+          // match a built-in preset used to download only the .gguf — this is
+          // the root cause of the "downloaded but won't load" bug.
+          const base = modelBaseUrl(url);
+          const looksLikeGguf = /\.gguf(?:$|\?)/i.test(url);
+          const entries: Array<{ url: string; destDir: string; filename: string | null }> = [
+            { url, destDir: target.destDir, filename: target.filename },
+          ];
+          if (base && looksLikeGguf && target.destDir.startsWith("models/")) {
+            for (const asset of HIGGS_MODEL_ASSET_FILES) {
+              entries.push({ url: `${base}/${asset}`, destDir: target.destDir, filename: asset });
+            }
+          }
+          for (let index = 0; index < entries.length; index += 1) {
+            const entry = entries[index];
+            activeDownloadFileLabel = `File ${index + 1}/${entries.length}: ${entry.filename ?? ""}`;
+            setText("#download-speed-text", `${activeDownloadFileLabel} · 0 MB/s`);
+            try {
+              await invoke<{ path: string; size: number }>("download_model", {
+                request: { url: entry.url, destDir: entry.destDir, filename: entry.filename },
+              });
+            } catch (assetErr) {
+              // The weights (index 0) are mandatory; a missing sidecar asset
+              // (some repos omit one) should warn, not abort the whole folder.
+              if (index === 0) throw assetErr;
+              console.warn(`Optional model asset failed: ${entry.url}`, assetErr);
+            }
+          }
+          showToast(entries.length > 1 ? "Model folder downloaded" : "Download complete");
         }
         await refreshModelList();
       }
@@ -5036,13 +5212,13 @@ async function initEventListeners(): Promise<void> {
   await listen<ModelStatusEvent>("model-status", (event) => {
     const status = event.payload;
     engineSupportsStreaming = Boolean(status.supportsStreaming);
-    setText("#engine-chip", status.engineLoaded ? "Engine loaded" : "Engine unloaded");
+    setText("#engine-chip", status.engineLoaded ? t("Engine loaded") : t("Engine unloaded"));
     el<HTMLElement>("#engine-chip").classList.toggle("active", status.engineLoaded);
 
     if (!status.modelLoaded) {
-      setText("#model-state", "Not loaded");
+      setText("#model-state", t("Not loaded"));
       el("#model-state").classList.remove("ok");
-      setText("#model-chip", "No model");
+      setText("#model-chip", t("No model"));
       el("#model-chip").classList.add("muted");
       el("#model-chip").classList.remove("active");
       el<HTMLButtonElement>("#unload-model-btn").disabled = true;
@@ -5051,7 +5227,7 @@ async function initEventListeners(): Promise<void> {
 
     if (status.displayName) {
       const uiName = selectedModelUiName();
-      setText("#model-state", "Loaded");
+      setText("#model-state", t("Loaded"));
       el("#model-state").classList.add("ok");
       setText("#model-chip", `${uiName} (${status.weightType || "default"})`);
       el("#model-chip").classList.remove("muted");
@@ -5183,6 +5359,10 @@ async function main(): Promise<void> {
 }
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// Localize the static markup before any init runs (default language: Russian).
+document.documentElement.lang = getLang();
+translateStaticDom();
 
 if (new URLSearchParams(window.location.search).get("popout") === "api-command-centre") {
   void initApiCommandPopout();

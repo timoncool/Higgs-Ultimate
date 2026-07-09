@@ -124,7 +124,15 @@
           </section>
 
           <footer class="sidebar-footer">
-            <button id="github-link" class="footer-link" type="button">★ Saganaki22/Higgs-Audio-v3-Studio</button>
+            <div class="portable-credit">
+              <span class="portable-credit-title">Русская портативная сборка</span>
+              <div class="portable-credit-links">
+                <button id="nerual-link" class="footer-link" type="button">Nerual Dreming</button>
+                <span class="credit-sep">·</span>
+                <button id="neuroport-link" class="footer-link" type="button">Нейро-Софт</button>
+              </div>
+            </div>
+            <button id="github-link" class="footer-link footer-author" type="button" title="Оригинальный проект и движок — спасибо автору">★ Оригинал: Saganaki22</button>
             <button id="version-link" class="footer-link version-link" type="button">v0.2.4</button>
           </footer>
         </aside>
@@ -210,6 +218,7 @@
                 </div>
                 <div class="identity-actions">
                   <button id="speaker-add-btn" class="compact-button primary" type="button">+ Speaker</button>
+                  <button id="speaker-voicepack-btn" class="compact-button" type="button" title="Download the standard Nerual Dreming voice pack and add all voices to the gallery">Standard voices</button>
                   <button id="speaker-import-btn" class="compact-button" type="button">Import</button>
                   <button id="speaker-export-btn" class="compact-button" type="button">Export</button>
                   <button id="speaker-delete-btn" class="compact-button danger" type="button">Delete</button>
@@ -621,6 +630,7 @@
           <!-- ═══ Generate / Cancel ═══ -->
           <div class="action-row" id="action-row">
             <button id="generate-btn" class="primary-btn" type="button">▶ Generate</button>
+            <button id="batch-btn" class="compact-button" type="button" title="Batch: generate each line of text as a separate clip (Text to Speech and Voice Clone)">⇉ Batch</button>
             <button id="queue-btn" class="compact-button primary hidden" type="button">Add to Queue</button>
             <button id="cancel-btn" class="cancel-btn hidden" type="button">⏹ Cancel</button>
           </div>
@@ -658,6 +668,10 @@
               <div class="player-controls">
                 <button id="play-btn" class="play-button" type="button">▶</button>
                 <span id="output-time" class="time-label">00:00 / 00:00</span>
+                <div class="volume-control" title="Volume">
+                  <span id="output-volume-icon" class="volume-icon" aria-hidden="true">🔊</span>
+                  <input id="output-volume" class="volume-slider" type="range" min="0" max="100" value="100" step="1" aria-label="Volume" />
+                </div>
               </div>
             </div>
           </div>
@@ -669,6 +683,13 @@
         <div class="settings-head">
           <strong>Settings</strong>
           <button id="settings-close" class="popover-close" type="button" aria-label="Close settings">✕</button>
+        </div>
+        <div class="settings-row">
+          <span>Language</span>
+          <div class="segmented">
+            <button id="lang-ru" type="button">RU</button>
+            <button id="lang-en" type="button">EN</button>
+          </div>
         </div>
         <div class="settings-row">
           <span>Theme</span>
