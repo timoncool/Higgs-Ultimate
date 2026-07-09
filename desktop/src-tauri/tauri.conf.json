@@ -40,7 +40,7 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico"],
-    "resources": ["resources/engine/*", "resources/higgs-assets/**/*"],
+    "resources": ["resources/engine/*", "resources/higgs-assets/**/*", "resources/parakeet/*"],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

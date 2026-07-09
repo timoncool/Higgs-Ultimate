@@ -287,12 +287,12 @@ export const RU: Record<string, string> = {
 
   // ── Download popover ──
   "Download Model": "Скачать модель",
-  "Download Whisper Model": "Скачать модель Whisper",
+  "Download Parakeet Model": "Скачать модель Whisper",
   "Download Engine DLLs": "Скачать DLL движка",
   "Close": "Закрыть",
   "Model file": "Файл модели",
   "Paste HuggingFace GGUF URL…": "Вставьте ссылку на GGUF с HuggingFace…",
-  "Paste whisper.cpp ggml .bin URL…": "Вставьте ссылку на ggml .bin whisper.cpp…",
+  "Paste Parakeet GGUF URL…": "Вставьте ссылку на ggml .bin whisper.cpp…",
   "Engine package URL…": "URL пакета движка…",
   "Fetch": "Скачать",
   "Pause": "Пауза",
@@ -370,7 +370,7 @@ export const RU: Record<string, string> = {
   "Select a model first": "Сначала выберите модель",
   "Select a saved speaker identity first": "Сначала выберите сохранённый голос",
   "Select a speaker identity to delete": "Выберите голос для удаления",
-  "Select a whisper model in Settings first": "Сначала выберите модель Whisper в настройках",
+  "Download the Parakeet model in Settings first": "Сначала выберите модель Whisper в настройках",
   "Speaker identity deleted": "Голос удалён",
   "Streaming needs an updated Higgs engine DLL; current DLL falls back to normal generation.":
     "Для стриминга нужен обновлённый DLL движка; текущий откатывается к обычной генерации.",
@@ -390,7 +390,7 @@ export const RU: Record<string, string> = {
   "Select saved identity…": "Выбрать сохранённый голос…",
   "Drop reference voice, or click to browse": "Перетащите референс-голос или нажмите для выбора",
   "Optional line-specific reference voice": "Необязательный референс для этой реплики",
-  "Optional. Auto-filled with Whisper when available.": "Необязательно. Автозаполнение через Whisper, если доступно.",
+  "Optional. Auto-filled with Parakeet when available.": "Необязательно. Автозаполнение через Whisper, если доступно.",
   "Optional notes for this identity": "Необязательные заметки об этом голосе",
   "Collapse speaker": "Свернуть спикера",
   "Expand speaker": "Развернуть спикера",

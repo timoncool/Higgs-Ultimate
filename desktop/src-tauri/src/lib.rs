@@ -1,6 +1,7 @@
 mod audio;
 mod download;
 mod engine;
+mod parakeet;
 
 use engine::{
     AudioChunkCallback, AudioResult, Engine, EngineError, GenerateRequest, LoadModelRequest,
@@ -1239,45 +1240,54 @@ async fn generate_finish_sentence(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Transcription (whisper.cpp)
+// Transcription (Parakeet — NVIDIA parakeet-tdt-0.6b-v3, multilingual incl. RU)
+//
+// Replaces whisper.cpp. ASR is decoupled from the C++ TTS engine: we shell out
+// to the self-contained `parakeet-cli.exe` (parakeet.cpp, CPU build) bundled in
+// resources/parakeet/. The v3 model auto-detects language, so no RU/EN toggle.
 // ═══════════════════════════════════════════════════════════════════════════
+
+/// Locate the bundled `parakeet.dll` (in resources/parakeet next to the exe).
+fn find_parakeet_library() -> Option<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(d) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+    {
+        dirs.push(d.join("resources").join("parakeet"));
+        dirs.push(d.join("parakeet"));
+    }
+    dirs.push(app_root_dir().join("resources").join("parakeet"));
+    dirs.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("parakeet"),
+    );
+    dirs.into_iter()
+        .map(|d| d.join("parakeet.dll"))
+        .find(|p| p.exists())
+}
 
 #[tauri::command]
 async fn transcribe_audio(
-    state: State<'_, AppState>,
     audio_path: String,
     whisper_model_path: Option<String>,
     language: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let engine = state.clone_engine()?;
-    let whisper_path = whisper_model_path
-        .ok_or_else(|| "No whisper model path set. Select one in Settings.".to_string())?;
-    let audio_wav = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
-    let lang = language.unwrap_or_else(|| "auto".into());
-    let mut out_text = vec![0u8; 65536];
+    let _ = language; // Parakeet v3 auto-detects the language.
+    let model_path = whisper_model_path
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| "No ASR model set. Download the Parakeet model in Settings.".to_string())?;
+    let dll = find_parakeet_library()
+        .ok_or_else(|| "parakeet.dll not found (resources/parakeet is missing).".to_string())?;
+    let wav_path = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
 
-    let (status, out_text) = tauri::async_runtime::spawn_blocking(move || {
-        let status = engine.transcribe(&whisper_path, &audio_wav, &lang, &mut out_text);
-        (status, out_text)
+    let text = tauri::async_runtime::spawn_blocking(move || {
+        parakeet::transcribe(&dll, &model_path, &wav_path, 0)
     })
     .await
-    .map_err(|e| format!("task join error: {e}"))?;
+    .map_err(|e| format!("task join error: {e}"))??;
 
-    let status = status.map_err(|e| e.to_string())?;
-    if status != 0 {
-        let msg = String::from_utf8_lossy(&out_text)
-            .trim_end_matches('\0')
-            .to_string();
-        return Err(if msg.is_empty() {
-            format!("transcribe failed (code {status})")
-        } else {
-            msg
-        });
-    }
-
-    let text = String::from_utf8_lossy(&out_text)
-        .trim_end_matches('\0')
-        .to_string();
     Ok(serde_json::json!({ "text": text }))
 }
 

@@ -790,7 +790,8 @@ function setWhisperModelPath(path: string): void {
 }
 
 function whisperPresetFilename(preset: WhisperModelPreset): string {
-  return `ggml-${preset.id}.bin`;
+  // Parakeet GGUF from mudler/parakeet-cpp-gguf is named "<id>.gguf".
+  return `${preset.id}.gguf`;
 }
 
 function whisperPresetUrl(preset: WhisperModelPreset): string {
@@ -827,7 +828,7 @@ function initWhisperPanel(): void {
   });
   el("#whisper-browse-btn").addEventListener("click", async () => {
     const selected = await open({
-      filters: [{ name: "Whisper Model", extensions: ["bin"] }],
+      filters: [{ name: "Parakeet Model", extensions: ["gguf"] }],
     });
     if (selected) setWhisperModelPath(selected);
   });
@@ -2002,7 +2003,7 @@ async function doAutoTranscribe(refPath: string | null, textareaId: string): Pro
 async function transcribeAudioText(refPath: string): Promise<string | null> {
   const whisperModelPath = localStorage.getItem("higgsAudio.whisperModel") || "";
   if (!whisperModelPath) {
-    showToast("Select a whisper model in Settings first", "warning");
+    showToast("Download the Parakeet model in Settings first", "warning");
     return null;
   }
   const result = await invoke<{ text: string }>("transcribe_audio", {
@@ -2839,7 +2840,7 @@ function renderMultiSpeakers(): void {
           ${multiDropzoneMarkup(speaker.refName, "Drop reference voice, or click to browse")}
         </div>
         <label class="field-label transcript-label">Reference transcript</label>
-        <textarea class="text-area" data-field="speaker-transcript" rows="2" placeholder="Optional. Auto-filled with Whisper when available.">${escapeHtml(speaker.refText)}</textarea>
+        <textarea class="text-area" data-field="speaker-transcript" rows="2" placeholder="Optional. Auto-filled with Parakeet when available.">${escapeHtml(speaker.refText)}</textarea>
         <label class="inline-toggle reference-normalize-toggle">
           <span>Normalize reference</span>
           <span class="toggle-switch"><input type="checkbox" data-field="speaker-normalize" ${speaker.normalize ? "checked" : ""} /><span class="toggle-slider"></span></span>
@@ -4941,12 +4942,12 @@ function initDownload(): void {
     activeDownloadKind = kind;
     const whisperPreset = selectedWhisperPreset();
     title.textContent = kind === "whisper"
-      ? t("Download Whisper Model")
+      ? t("Download Parakeet Model")
       : kind === "engine"
         ? t("Download Engine DLLs")
         : t("Download Model");
     urlInput.placeholder = kind === "whisper"
-      ? t("Paste whisper.cpp ggml .bin URL…")
+      ? t("Paste Parakeet GGUF URL…")
       : kind === "engine"
         ? t("Engine package URL…")
         : t("Paste HuggingFace GGUF URL…");
@@ -4986,11 +4987,11 @@ function initDownload(): void {
         showToast(`Engine DLLs downloaded: ${result.path}`);
       } else if (kind === "whisper") {
         const result = await invoke<{ path: string; size: number }>("download_model", {
-          request: { url, destDir: "models/whisper", filename: null },
+          request: { url, destDir: "models/parakeet", filename: null },
         });
         localStorage.setItem("higgsAudio.whisperPreset", selectedWhisperPreset().id);
         setWhisperModelPath(result.path);
-        showToast("Whisper model downloaded");
+        showToast("Parakeet model downloaded");
       } else {
         const selectedPreset = ttsPresetById(presetSelect.value);
         const preset = ttsPresetFromModelDownloadUrl(url) ||
@@ -5101,7 +5102,7 @@ function initDownload(): void {
   fetchButton.addEventListener("click", async () => {
     const url = urlInput.value.trim();
     if (!url) {
-      showToast(activeDownloadKind === "whisper" ? "Enter a whisper.cpp model URL" : "Enter a HuggingFace URL", "warning");
+      showToast(activeDownloadKind === "whisper" ? "Enter a Parakeet model URL" : "Enter a HuggingFace URL", "warning");
       return;
     }
     await startDownload(activeDownloadKind, url);

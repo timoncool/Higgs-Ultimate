@@ -24,3 +24,4 @@ __pycache__/
 /*.wav
 /flutter/
 /.cache/
+desktop/src-tauri/resources/parakeet/*.dll
