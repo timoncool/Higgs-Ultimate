@@ -39,6 +39,16 @@
 - **WebView2** — предустановлен в Windows 11 (в Windows 10 ставится автоматически)
 - **Место:** ~6 ГБ на модель (Q8_0)
 
+## Что нужно установить (важно!)
+
+Движок работает на **CUDA**, поэтому **перед первым запуском** поставьте в систему три вещи — без них движок не загрузится:
+
+1. **Свежий драйвер NVIDIA** — [nvidia.com/Download](https://www.nvidia.com/Download/index.aspx)
+2. **CUDA Toolkit 13.x** — [developer.nvidia.com/cuda-downloads](https://developer.nvidia.com/cuda-downloads). Даёт системные библиотеки CUDA (`cudart`, `cuBLAS`, `cuSPARSE` и др.), без которых `audiocpp_engine.dll` падает с ошибкой о недостающих DLL.
+3. **Visual C++ Redistributable x64** — [aka.ms/vs/17/release/vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+
+> Если при загрузке движка приложение пишет «missing required runtime DLL» — не хватает именно этих компонентов. Кнопка «Скачать DLL движка» тянет только сам движок; системные CUDA и драйвер должны стоять заранее.
+
 ## Быстрый старт
 
 1. **Скачать** портативную сборку из [Releases](https://github.com/timoncool/Higgs-Ultimate/releases) и распаковать в любую папку.
