@@ -381,6 +381,10 @@ export const RU: Record<string, string> = {
   "or record your own voice with the microphone": "или запишите свой голос с микрофона",
   "Record voice": "Записать голос",
   "Standard voices already imported": "Стандартные голоса уже добавлены",
+  "Loading engine…": "Загружаю движок…",
+  "Loading model…": "Загружаю модель…",
+  "Download the engine first — opening downloader": "Сначала скачайте движок — открываю загрузчик",
+  "Download a model first — opening downloader": "Сначала скачайте модель — открываю загрузчик",
 
   // ── Dynamically rendered cards (multi-speaker, gallery, queue) ──
   "No saved speakers yet": "Пока нет сохранённых голосов",

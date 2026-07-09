@@ -4194,12 +4194,97 @@ async function runGenerationJob(job: GenerationJob): Promise<void> {
   }
 }
 
+// Make sure the engine + a model are loaded before generating. Auto-loads
+// whatever is already available so the user doesn't have to click Load Engine /
+// Load Model by hand. Returns false only if something is genuinely missing
+// (no valid engine, or no model selected/downloaded).
+async function ensureLoadedForGeneration(): Promise<boolean> {
+  let status = await invoke<ModelStatusEvent>("engine_status").catch(() => null);
+
+  // Engine — auto-load if present; if the DLL isn't downloaded at all, open the
+  // engine downloader.
+  if (!status?.engineLoaded) {
+    const bundled = await invoke<string | null>("bundled_engine_path").catch(() => null);
+    const savedEngine = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || "";
+    if (!bundled && !savedEngine) {
+      showToast(t("Download the engine first — opening downloader"), "warning");
+      el<HTMLButtonElement>("#download-engine-btn").click();
+      return false;
+    }
+    showToast(t("Loading engine…"));
+    await doLoadEngine();
+    status = await invoke<ModelStatusEvent>("engine_status").catch(() => null);
+    if (!status?.engineLoaded) return false; // doLoadEngine already surfaced why
+  }
+
+  // Model — auto-select+load a downloaded one; if none is downloaded, open the
+  // model downloader.
+  if (!status?.modelLoaded) {
+    const modelSel = el<HTMLSelectElement>("#model-select");
+    if (!modelSel.value) {
+      const saved = localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+      if (saved) {
+        addLocalModelOption(saved);
+        modelSel.value = saved;
+      }
+    }
+    if (!modelSel.value) {
+      const models = await invoke<ModelListing[]>("list_models").catch(() => [] as ModelListing[]);
+      const usable = models.filter((m) => m.hasConfig !== false);
+      if (usable.length === 0) {
+        showToast(t("Download a model first — opening downloader"), "warning");
+        el<HTMLButtonElement>("#download-trigger").click();
+        return false;
+      }
+      modelSel.value = usable[0].path;
+    }
+    showToast(t("Loading model…"));
+    await doLoadModel();
+    status = await invoke<ModelStatusEvent>("engine_status").catch(() => null);
+    if (!status?.modelLoaded) return false;
+  }
+  return true;
+}
+
+// On startup, silently load the engine + last-used model if everything needed
+// is already present, so the app is ready to generate right away.
+async function autoStartupLoad(): Promise<void> {
+  try {
+    const status = await invoke<ModelStatusEvent>("engine_status").catch(() => null);
+    if (status?.engineLoaded && status?.modelLoaded) return;
+
+    if (!status?.engineLoaded) {
+      const bundled = await invoke<string | null>("bundled_engine_path").catch(() => null);
+      const enginePath = localStorage.getItem(ENGINE_PATH_STORAGE_KEY) || bundled;
+      if (!enginePath) return;
+      const diag = await diagnoseEngineForPath(enginePath);
+      if (diag && !diag.ok) return; // missing CUDA/runtime — let the user fix it, no spam
+      await doLoadEngine();
+    }
+
+    const modelSel = el<HTMLSelectElement>("#model-select");
+    if (!modelSel.value) {
+      const savedModel = localStorage.getItem(MODEL_PATH_STORAGE_KEY) || "";
+      if (savedModel && Array.from(modelSel.options).some((o) => o.value === savedModel)) {
+        modelSel.value = savedModel;
+      }
+    }
+    const nowLoaded = await invoke<ModelStatusEvent>("engine_status").catch(() => null);
+    if (modelSel.value && !nowLoaded?.modelLoaded) {
+      await doLoadModel();
+    }
+  } catch {
+    // Silent: the user can still load manually.
+  }
+}
+
 async function doGenerate(): Promise<void> {
   if (isGenerating) {
     enqueueCurrentGenerationJob();
     return;
   }
   try {
+    if (!(await ensureLoadedForGeneration())) return;
     const job = captureCurrentGenerationJob();
     await runGenerationJob(job);
   } catch (e) {
@@ -4353,6 +4438,7 @@ async function runBatch(): Promise<void> {
     showToast("Please enter text to speak (one clip per line)", "warning");
     return;
   }
+  if (!(await ensureLoadedForGeneration())) return;
   const personaId = el<HTMLSelectElement>("#batch-persona").value;
   const persona = personaId ? findPersona(personaId) : undefined;
   batchRunning = true;
@@ -5704,11 +5790,9 @@ async function main(): Promise<void> {
   renderHistory();
   pollHardware();
 
-  // Auto-load engine on startup if bundled
-  const bundled = await invoke<string | null>("bundled_engine_path");
-  if (bundled) {
-    await doLoadEngine();
-  }
+  // Auto-load engine AND the last-used model on startup, so the app is ready to
+  // generate without clicking Load Engine / Load Model by hand.
+  void autoStartupLoad();
   window.setTimeout(() => void maybeShowSetupWizard(), 500);
 
   window.addEventListener("resize", () => {
