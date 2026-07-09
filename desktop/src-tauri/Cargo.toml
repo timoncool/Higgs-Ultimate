@@ -1,6 +1,6 @@
 [package]
 name = "higgs-audio-studio"
-version = "0.2.4"
+version = "0.3.0"
 description = "Tauri shell for the ported Higgs Audio v3 C++ engine"
 authors = ["Higgs Audio v3 Studio"]
 edition = "2021"

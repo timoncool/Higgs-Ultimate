@@ -1,10 +1,10 @@
 import type { TtsModelPreset, WhisperModelPreset } from "./types";
 
-export const APP_VERSION = "0.2.4";
+export const APP_VERSION = "0.3.0";
 // Original author (engine + upstream app) — credit preserved in the UI footer.
 export const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 // This Russian portable fork.
-export const FORK_URL = "https://github.com/timoncool/Higgs-Audio-v3-Studio-rus";
+export const FORK_URL = "https://github.com/timoncool/Higgs-Ultimate";
 export const RELEASES_URL = `${FORK_URL}/releases`;
 // Portable-build authors.
 export const NERUAL_DREMING_URL = "https://t.me/nerual_dreming";

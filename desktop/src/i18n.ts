@@ -54,7 +54,7 @@ export const RU: Record<string, string> = {
 
   // ── Whisper panel ──
   "Choose model": "Выбрать модель",
-  "Whisper model": "Модель Whisper",
+  "Parakeet model": "Модель Parakeet",
   "Selected file": "Выбранный файл",
   "Select ggml-base.en.bin…": "Выберите файл ggml…",
 
@@ -287,12 +287,12 @@ export const RU: Record<string, string> = {
 
   // ── Download popover ──
   "Download Model": "Скачать модель",
-  "Download Parakeet Model": "Скачать модель Whisper",
+  "Download Parakeet Model": "Скачать модель Parakeet",
   "Download Engine DLLs": "Скачать DLL движка",
   "Close": "Закрыть",
   "Model file": "Файл модели",
   "Paste HuggingFace GGUF URL…": "Вставьте ссылку на GGUF с HuggingFace…",
-  "Paste Parakeet GGUF URL…": "Вставьте ссылку на ggml .bin whisper.cpp…",
+  "Paste Parakeet GGUF URL…": "Вставьте ссылку на GGUF Parakeet…",
   "Engine package URL…": "URL пакета движка…",
   "Fetch": "Скачать",
   "Pause": "Пауза",
@@ -332,7 +332,7 @@ export const RU: Record<string, string> = {
   "Load": "Загрузить",
   "Higgs model folder": "Папка модели Higgs",
   "Checking downloaded model folders...": "Проверка скачанных папок моделей…",
-  "Whisper auto-transcribe": "Автотранскрипт Whisper",
+  "Parakeet auto-transcribe": "Автотранскрипт Parakeet",
   "Optional. Needed only for auto reference transcripts.": "Необязательно. Нужно только для авто-транскриптов референса.",
   "Refresh": "Обновить",
   "Open Studio": "Открыть студию",
@@ -370,13 +370,13 @@ export const RU: Record<string, string> = {
   "Select a model first": "Сначала выберите модель",
   "Select a saved speaker identity first": "Сначала выберите сохранённый голос",
   "Select a speaker identity to delete": "Выберите голос для удаления",
-  "Download the Parakeet model in Settings first": "Сначала выберите модель Whisper в настройках",
+  "Download the Parakeet model in Settings first": "Сначала скачайте модель Parakeet в настройках",
   "Speaker identity deleted": "Голос удалён",
   "Streaming needs an updated Higgs engine DLL; current DLL falls back to normal generation.":
     "Для стриминга нужен обновлённый DLL движка; текущий откатывается к обычной генерации.",
   "That speaker identity has no reference audio": "У этого голоса нет референс-аудио",
   "Use lines like [Speaker1] text to import a script": "Используйте строки вида [Speaker1] текст для импорта сценария",
-  "Whisper model downloaded": "Модель Whisper скачана",
+  "Parakeet model downloaded": "Модель Parakeet скачана",
   "🎤 Record voice": "🎤 Записать голос",
   "or record your own voice with the microphone": "или запишите свой голос с микрофона",
   "Record voice": "Записать голос",
