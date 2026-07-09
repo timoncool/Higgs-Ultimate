@@ -43,7 +43,7 @@
     "resources": ["resources/engine/*", "resources/higgs-assets/**/*"],
     "windows": {
       "webviewInstallMode": {
-        "type": "embedBootstrapper"
+        "type": "downloadBootstrapper"
       },
       "nsis": {
         "compression": "lzma"
