@@ -148,6 +148,7 @@
             <button class="mode-tab" data-mode="multi" role="tab" aria-selected="false">Multi Speaker</button>
             <button class="mode-tab" data-mode="api" role="tab" aria-selected="false">API</button>
             <button class="mode-tab" data-mode="speakers" role="tab" aria-selected="false">Speaker Gallery</button>
+            <button class="mode-tab" data-mode="batch" role="tab" aria-selected="false">Batch</button>
             <button class="mode-tab" data-mode="history" role="tab" aria-selected="false">History</button>
           </div>
 
@@ -627,10 +628,43 @@
             </div>
           </div>
 
+          <!-- ═══ Batch mode ═══ -->
+          <div class="mode-content hidden" id="mode-batch">
+            <div class="history-head">
+              <h3>Batch generation</h3>
+            </div>
+            <p class="input-hint">Generate many clips at once. One line = one clip, or load .txt files.</p>
+            <div class="input-group">
+              <label for="batch-persona" class="field-label">Voice</label>
+              <select id="batch-persona" class="select-input"></select>
+              <p class="input-hint">Empty = base voice. Pick a saved identity to clone it for every clip.</p>
+            </div>
+            <div class="input-group">
+              <label for="batch-text" class="field-label">List of phrases (one per line)</label>
+              <textarea id="batch-text" class="text-area" rows="8" placeholder="First phrase.
+Second phrase.
+Third phrase."></textarea>
+            </div>
+            <div class="batch-file-row">
+              <button id="batch-load-files" class="compact-button" type="button">Load .txt files…</button>
+              <label class="inline-toggle">
+                <span>Each line = a clip</span>
+                <span class="toggle-switch"><input type="checkbox" id="batch-split-lines" checked /><span class="toggle-slider"></span></span>
+              </label>
+              <button id="batch-clear-files" class="compact-button hidden" type="button">Clear files</button>
+              <span id="batch-files-info" class="input-hint"></span>
+            </div>
+            <div class="action-row">
+              <button id="batch-generate-btn" class="primary-btn" type="button">▶ Generate batch</button>
+              <button id="batch-stop-btn" class="cancel-btn hidden" type="button">⏹ Stop</button>
+            </div>
+            <div id="batch-log" class="batch-log"></div>
+            <div id="batch-results" class="batch-results"></div>
+          </div>
+
           <!-- ═══ Generate / Cancel ═══ -->
           <div class="action-row" id="action-row">
             <button id="generate-btn" class="primary-btn" type="button">▶ Generate</button>
-            <button id="batch-btn" class="compact-button" type="button" title="Batch: generate each line of text as a separate clip (Text to Speech and Voice Clone)">⇉ Batch</button>
             <button id="queue-btn" class="compact-button primary hidden" type="button">Add to Queue</button>
             <button id="cancel-btn" class="cancel-btn hidden" type="button">⏹ Cancel</button>
           </div>

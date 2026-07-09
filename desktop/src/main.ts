@@ -1235,7 +1235,8 @@ function switchMode(mode: Mode): void {
     content.classList.toggle("hidden", content.id !== `mode-${mode}`);
   }
   // Hide generation UI in utility views.
-  const isUtility = mode === "history" || mode === "api" || mode === "speakers";
+  const isUtility = mode === "history" || mode === "api" || mode === "speakers" || mode === "batch";
+  if (mode === "batch") refreshBatchPersonaOptions();
   el<HTMLElement>("#advanced-details").classList.toggle("hidden", isUtility);
   el<HTMLElement>("#action-row").classList.toggle("hidden", isUtility);
   el<HTMLElement>("#progress-section").classList.toggle("hidden", isUtility || !isGenerating || activeGenerationJob?.mode !== mode);
@@ -2151,7 +2152,7 @@ function personaNameFromPath(path: string): string {
 }
 
 function personaOptions(selectedId: string, emptyLabel = "Select saved identity…"): string {
-  const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`];
+  const options = [`<option value="">${escapeHtml(t(emptyLabel))}</option>`];
   for (const persona of speakerPersonas) {
     options.push(`<option value="${escapeHtml(persona.id)}" ${persona.id === selectedId ? "selected" : ""}>${escapeHtml(persona.name)}</option>`);
   }
@@ -2365,9 +2366,10 @@ function renderSpeakerGalleryEditor(): void {
 }
 
 function renderSpeakerPersonaUi(): void {
-  const countText = `${speakerPersonas.length} saved`;
+  const countText = `${speakerPersonas.length} ${t("saved")}`;
   const count = document.querySelector<HTMLElement>("#speaker-identity-count");
   if (count) count.textContent = countText;
+  refreshBatchPersonaOptions();
 
   const cloneSelect = document.querySelector<HTMLSelectElement>("#clone-persona-select");
   if (cloneSelect) {
@@ -3503,15 +3505,12 @@ function updateGeneratingTabs(): void {
 
 function updateGenerationControls(): void {
   const modeCanGenerate = isGenerationMode(currentMode);
-  const isUtility = currentMode === "history" || currentMode === "api" || currentMode === "speakers";
+  const isUtility = currentMode === "history" || currentMode === "api" || currentMode === "speakers" || currentMode === "batch";
   const generateBtn = el<HTMLButtonElement>("#generate-btn");
-  const batchBtn = el<HTMLButtonElement>("#batch-btn");
   const queueBtn = el<HTMLButtonElement>("#queue-btn");
   const cancelBtn = el<HTMLButtonElement>("#cancel-btn");
-  const modeSupportsBatch = currentMode === "tts" || currentMode === "clone";
   el<HTMLElement>("#action-row").classList.toggle("hidden", isUtility || !modeCanGenerate);
   generateBtn.classList.toggle("hidden", isGenerating || !modeCanGenerate);
-  batchBtn.classList.toggle("hidden", isGenerating || !modeSupportsBatch);
   queueBtn.classList.toggle("hidden", !isGenerating || !modeCanGenerate);
   cancelBtn.classList.toggle("hidden", !isGenerating || activeGenerationJob?.mode !== currentMode);
   el<HTMLElement>("#progress-section").classList.toggle(
@@ -4009,54 +4008,206 @@ async function doGenerate(): Promise<void> {
   }
 }
 
-// Batch mode: split the current text field into lines and generate each line
-// as a separate clip via the existing generation queue. Works in Text-to-Speech
-// and Voice Clone modes (one voice/settings, many lines). Each clip lands in
-// History with its own player and save button.
-function batchTextForMode(): string | null {
-  if (currentMode === "tts") return el<HTMLTextAreaElement>("#tts-text").value;
-  if (currentMode === "clone") return el<HTMLTextAreaElement>("#clone-text").value;
-  return null;
+// ═══════════════════════════════════════════════════════════════════════════
+// Batch generation (dedicated tab): many clips at once from a textarea
+// (one line = one clip) and/or loaded .txt files. Each clip is generated with
+// the base voice or a chosen saved identity, rendered with its own player and
+// save button, and also stored in History.
+// ═══════════════════════════════════════════════════════════════════════════
+
+let batchFileClips: string[] = [];
+let batchRunning = false;
+let batchCancel = false;
+
+function setBatchLog(text: string): void {
+  el<HTMLElement>("#batch-log").textContent = text;
 }
 
-async function doBatchGenerate(): Promise<void> {
-  const raw = batchTextForMode();
-  if (raw === null) {
-    showToast("Batch works in the Text to Speech and Voice Clone tabs", "warning");
-    return;
+function updateBatchFilesInfo(): void {
+  const info = el<HTMLElement>("#batch-files-info");
+  const clearBtn = el<HTMLButtonElement>("#batch-clear-files");
+  if (batchFileClips.length > 0) {
+    info.textContent = `${t("From files:")} ${batchFileClips.length}`;
+    clearBtn.classList.remove("hidden");
+  } else {
+    info.textContent = "";
+    clearBtn.classList.add("hidden");
   }
-  const lines = raw
+}
+
+function refreshBatchPersonaOptions(): void {
+  const select = document.querySelector<HTMLSelectElement>("#batch-persona");
+  if (!select) return;
+  const current = select.value;
+  select.innerHTML = personaOptions(current, "Base voice (no cloning)");
+}
+
+async function loadBatchTxtFiles(): Promise<void> {
+  try {
+    const selected = await open({ multiple: true, filters: [{ name: "Text", extensions: ["txt"] }] });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    const splitLines = el<HTMLInputElement>("#batch-split-lines").checked;
+    let added = 0;
+    for (const path of paths) {
+      const content = await invoke<string>("read_text_file", { path });
+      if (splitLines) {
+        for (const line of content.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)) {
+          batchFileClips.push(line);
+          added += 1;
+        }
+      } else {
+        const whole = content.trim();
+        if (whole) {
+          batchFileClips.push(whole);
+          added += 1;
+        }
+      }
+    }
+    updateBatchFilesInfo();
+    showToast(`${t("Clips loaded from files:")} ${added}`);
+  } catch (e) {
+    showToast(`${t("Could not read files")}: ${e}`, "error");
+  }
+}
+
+function collectBatchTexts(): string[] {
+  const fromTextarea = el<HTMLTextAreaElement>("#batch-text").value
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length === 0) {
+    .filter(Boolean);
+  return [...fromTextarea, ...batchFileClips];
+}
+
+function buildBatchJob(text: string, persona: SpeakerPersona | undefined): GenerationJob {
+  const payload: GenerationJob["payload"] = persona && persona.refPath
+    ? {
+        kind: "clone",
+        text,
+        refPath: persona.refPath,
+        refName: persona.refName,
+        refText: persona.refText || undefined,
+        normalize: persona.normalize,
+        personaId: persona.id,
+      }
+    : { kind: "tts", text };
+  return {
+    id: nextId("batch"),
+    mode: payload.kind === "clone" ? "clone" : "tts",
+    label: text.slice(0, 48),
+    createdAt: Date.now(),
+    options: gatherOptions(),
+    deliveryPrefix: deliveryControlPrefix(),
+    payload,
+  };
+}
+
+async function saveResultToFile(result: GenerationResult, defaultName: string): Promise<void> {
+  const format = selectedSaveFormat;
+  try {
+    const path = await save({
+      defaultPath: `${defaultName}.${format}`,
+      filters: [format === "wav"
+        ? { name: "WAV Audio", extensions: ["wav"] }
+        : { name: "MP3 Audio", extensions: ["mp3"] }],
+    });
+    if (!path) return;
+    const base64Audio = format === "wav"
+      ? result.wavBase64
+      : bytesToBase64(await encodeMp3FromWav(result.wavBase64));
+    await invoke("save_binary_file", { path, base64Data: base64Audio });
+    showToast(`${t("Saved")} ${format.toUpperCase()}`);
+  } catch (e) {
+    showToast(`Save failed: ${e}`, "error");
+  }
+}
+
+function appendBatchResult(index: number, text: string, result: GenerationResult): void {
+  const list = el<HTMLElement>("#batch-results");
+  const card = document.createElement("div");
+  card.className = "batch-result-item";
+  const label = document.createElement("div");
+  label.className = "batch-result-label";
+  label.textContent = `${index + 1}. ${text.slice(0, 80)}`;
+  const audio = document.createElement("audio");
+  audio.controls = true;
+  audio.preload = "none";
+  void base64ToBlobAsync(result.wavBase64, "audio/wav").then((blob) => {
+    audio.src = URL.createObjectURL(blob);
+  });
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "compact-button";
+  saveBtn.type = "button";
+  saveBtn.textContent = t("Save");
+  saveBtn.addEventListener("click", () => void saveResultToFile(result, `higgs_batch_${index + 1}`));
+  const row = document.createElement("div");
+  row.className = "batch-result-controls";
+  row.append(audio, saveBtn);
+  card.append(label, row);
+  list.appendChild(card);
+}
+
+async function runBatch(): Promise<void> {
+  if (batchRunning) return;
+  const texts = collectBatchTexts();
+  if (texts.length === 0) {
     showToast("Please enter text to speak (one clip per line)", "warning");
     return;
   }
-  if (lines.length === 1) {
-    await doGenerate();
-    return;
+  const personaId = el<HTMLSelectElement>("#batch-persona").value;
+  const persona = personaId ? findPersona(personaId) : undefined;
+  batchRunning = true;
+  batchCancel = false;
+  el<HTMLElement>("#batch-results").innerHTML = "";
+  el<HTMLButtonElement>("#batch-generate-btn").classList.add("hidden");
+  el<HTMLButtonElement>("#batch-stop-btn").classList.remove("hidden");
+  let done = 0;
+  let failed = 0;
+  for (let i = 0; i < texts.length; i++) {
+    if (batchCancel) break;
+    setBatchLog(`${t("Generating")} ${i + 1}/${texts.length}…`);
+    try {
+      const result = await generateJobAudio(buildBatchJob(texts[i], persona));
+      if (batchCancel) break;
+      appendBatchResult(i, texts[i], result);
+      addHistory("batch", texts[i].slice(0, 48), result);
+      done += 1;
+    } catch (e) {
+      const msg = String(e);
+      if (msg.toLowerCase().includes("cancel")) break;
+      failed += 1;
+      const err = document.createElement("div");
+      err.className = "batch-result-item error";
+      err.textContent = `${i + 1}. ${t("Failed")}: ${e}`;
+      el<HTMLElement>("#batch-results").appendChild(err);
+    }
   }
-  let jobs: GenerationJob[];
+  batchRunning = false;
+  el<HTMLButtonElement>("#batch-generate-btn").classList.remove("hidden");
+  el<HTMLButtonElement>("#batch-stop-btn").classList.add("hidden");
+  setBatchLog(batchCancel
+    ? `${t("Stopped")}. ${t("Done")}: ${done}`
+    : `${t("Done")}: ${done}${failed ? ` · ${t("Failed")}: ${failed}` : ""}`);
+}
+
+async function stopBatch(): Promise<void> {
+  batchCancel = true;
   try {
-    jobs = lines.map((line) => captureCurrentGenerationJob(line));
-  } catch (e) {
-    showToast(String(e), "warning");
-    return;
+    await invoke("cancel_generation");
+  } catch {
+    /* engine may be idle */
   }
-  if (isGenerating) {
-    generationQueue.push(...jobs);
-    renderQueuePanel();
-    updateGenerationControls();
-    showToast(`Batch queued: ${jobs.length} clips`);
-    return;
-  }
-  const [first, ...rest] = jobs;
-  generationQueue.push(...rest);
-  renderQueuePanel();
-  updateGenerationControls();
-  showToast(`Batch: generating ${jobs.length} clips`);
-  await runGenerationJob(first);
+}
+
+function initBatchTab(): void {
+  refreshBatchPersonaOptions();
+  el("#batch-load-files").addEventListener("click", () => void loadBatchTxtFiles());
+  el("#batch-clear-files").addEventListener("click", () => {
+    batchFileClips = [];
+    updateBatchFilesInfo();
+  });
+  el("#batch-generate-btn").addEventListener("click", () => void runBatch());
+  el("#batch-stop-btn").addEventListener("click", () => void stopBatch());
 }
 
 async function doCancel(): Promise<void> {
@@ -4078,7 +4229,6 @@ async function doCancel(): Promise<void> {
 
 function initGenerate(): void {
   el("#generate-btn").addEventListener("click", doGenerate);
-  el("#batch-btn").addEventListener("click", () => void doBatchGenerate());
   el("#queue-btn").addEventListener("click", enqueueCurrentGenerationJob);
   el("#cancel-btn").addEventListener("click", doCancel);
   el("#queue-clear-btn").addEventListener("click", () => {
@@ -5341,6 +5491,7 @@ async function main(): Promise<void> {
   initAdvancedOptions();
   initGenerate();
   initAudioPlayer();
+  initBatchTab();
   initDownload();
   initSetupWizard();
   initTextCounting();

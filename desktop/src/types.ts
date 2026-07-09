@@ -1,4 +1,4 @@
-export type Mode = "tts" | "clone" | "speakers" | "finish" | "multi" | "api" | "history";
+export type Mode = "tts" | "clone" | "speakers" | "finish" | "multi" | "api" | "history" | "batch";
 export type SaveFormat = "wav" | "mp3";
 export type DownloadKind = "model" | "whisper" | "engine";
 

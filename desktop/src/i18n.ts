@@ -387,6 +387,7 @@ export const RU: Record<string, string> = {
   "Edit": "Править",
   "API request": "API-запрос",
   "Use saved identity…": "Выбрать сохранённый голос…",
+  "Select saved identity…": "Выбрать сохранённый голос…",
   "Drop reference voice, or click to browse": "Перетащите референс-голос или нажмите для выбора",
   "Optional line-specific reference voice": "Необязательный референс для этой реплики",
   "Optional. Auto-filled with Whisper when available.": "Необязательно. Автозаполнение через Whisper, если доступно.",
@@ -399,6 +400,32 @@ export const RU: Record<string, string> = {
   "Text to speak for this line...": "Текст этой реплики…",
   "Reference transcript override": "Переопределение транскрипта",
   "Leave blank to use the selected speaker transcript.": "Оставьте пустым — возьмётся транскрипт выбранного спикера.",
+
+  // ── Batch tab ──
+  "Batch": "Пакет",
+  "Batch generation": "Пакетная генерация",
+  "Generate many clips at once. One line = one clip, or load .txt files.":
+    "Генерируйте много клипов сразу. Одна строка = один клип, либо загрузите .txt файлы.",
+  "Voice": "Голос",
+  "Empty = base voice. Pick a saved identity to clone it for every clip.":
+    "Пусто = базовый голос. Выберите сохранённый голос, чтобы клонировать его для всех клипов.",
+  "List of phrases (one per line)": "Список фраз (по одной в строке)",
+  "Load .txt files…": "Загрузить .txt файлы…",
+  "Each line = a clip": "Каждая строка = клип",
+  "Clear files": "Очистить файлы",
+  "▶ Generate batch": "▶ Сгенерировать пакет",
+  "⏹ Stop": "⏹ Стоп",
+  "First phrase.\nSecond phrase.\nThird phrase.": "Первая фраза.\nВторая фраза.\nТретья фраза.",
+  "From files:": "Из файлов:",
+  "Base voice (no cloning)": "Базовый голос (без клонирования)",
+  "Clips loaded from files:": "Клипов загружено из файлов:",
+  "Could not read files": "Не удалось прочитать файлы",
+  "Generating": "Генерация",
+  "Saved": "Сохранено",
+  "Save": "Сохранить",
+  "Failed": "Ошибка",
+  "Done": "Готово",
+  "saved": "сохр.",
 };
 
 // Translate a dynamic string. Returns Russian when in RU mode and known,

@@ -1280,6 +1280,16 @@ input[type="range"]::-moz-range-thumb {
   background: var(--accent); cursor: pointer;
 }
 
+/* Batch tab */
+.batch-file-row { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.batch-log { color: var(--text-muted); font-size: 13px; font-weight: 700; margin: 8px 0; min-height: 18px; }
+.batch-results { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.batch-result-item { background: var(--surface-2, #17171c); border: 1px solid var(--border, #2a2a30); border-radius: 10px; padding: 10px 12px; }
+.batch-result-item.error { border-color: #7a2b2b; color: #ff9a9a; }
+.batch-result-label { color: var(--text-muted); font-size: 13px; margin-bottom: 8px; word-break: break-word; }
+.batch-result-controls { align-items: center; display: flex; gap: 10px; }
+.batch-result-controls audio { flex: 1; height: 34px; min-width: 0; }
+
 /* ─── History list ─── */
 .history-head { align-items: center; display: flex; justify-content: space-between; margin-bottom: 12px; }
 .history-head h3 { font-size: 14px; font-weight: 780; }
