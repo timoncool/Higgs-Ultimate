@@ -1,10 +1,12 @@
+import { t } from "./i18n";
+
 export function el<T extends HTMLElement>(id: string): T {
   return document.querySelector<T>(id)!;
 }
 
 export function setText(id: string, text: string): void {
   const e = el<HTMLElement>(id);
-  if (e) e.textContent = text;
+  if (e) e.textContent = t(text);
 }
 
 export function cssVar(name: string, fallback: string): string {

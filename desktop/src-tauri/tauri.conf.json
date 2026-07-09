@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Higgs Audio v3 Studio",
+  "productName": "Higgs Ultimate",
   "version": "0.2.4",
   "identifier": "com.higgsaudio.studio",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Higgs Audio v3 Studio",
+        "title": "Higgs Ultimate",
         "width": 1280,
         "height": 860,
         "minWidth": 1180,

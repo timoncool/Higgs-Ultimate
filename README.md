@@ -1,4 +1,4 @@
-# Higgs Audio v3 Studio — русская портативная версия
+# Higgs Ultimate — русская портативная версия (движок Higgs Audio v3)
 
 [![Stars](https://img.shields.io/github/stars/timoncool/Higgs-Audio-v3-Studio-rus?style=social)](https://github.com/timoncool/Higgs-Audio-v3-Studio-rus/stargazers)
 [![License](https://img.shields.io/github/license/timoncool/Higgs-Audio-v3-Studio-rus)](LICENSE)

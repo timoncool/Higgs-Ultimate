@@ -305,6 +305,22 @@ export const RU: Record<string, string> = {
   "Cancel": "Отмена",
   "Export selected": "Экспорт выбранных",
 
+  // ── First run wizard (dynamic) ──
+  "Loaded and ready": "Загружено и готово",
+  "Found:": "Найдено:",
+  "Selected:": "Выбрано:",
+  "Not found. Download the engine package or browse to audiocpp_engine.dll.":
+    "Не найдено. Скачайте пакет движка или укажите файл audiocpp_engine.dll.",
+  "Saved engine path not found:": "Сохранённый путь движка не найден:",
+  "No Higgs model folder found. Download a model folder or browse to one.":
+    "Папка модели Higgs не найдена. Скачайте модель или укажите папку вручную.",
+  "Optional. Download only if you want auto-transcription.":
+    "Необязательно. Скачайте, только если нужен авто-транскрипт.",
+  "Core setup found. You can load anything not already loaded, or close this wizard.":
+    "Основные файлы на месте. Загрузите то, что ещё не загружено, или закройте мастер.",
+  "Some core setup files are missing. Use Browse if you already have them, or Download to fetch them.":
+    "Не хватает основных файлов. Нажмите «Обзор», если они у вас уже есть, или «Скачать».",
+
   // ── First run wizard ──
   "First Run Setup": "Первый запуск",
   "Engine, model, then generate": "Движок, модель, затем генерация",
@@ -330,6 +346,38 @@ export const RU: Record<string, string> = {
   "Copy diagnostics": "Копировать диагностику",
   "NVIDIA driver": "Драйвер NVIDIA",
   "VC++ runtime": "VC++ рантайм",
+
+  // ── Toasts / statuses (dynamic) ──
+  "A download is already running. Use Pause, Resume, or Stop.": "Загрузка уже идёт. Используйте Паузу, Продолжить или Стоп.",
+  "Batch works in the Text to Speech and Voice Clone tabs": "Пакетный режим работает во вкладках TTS и Клон голоса",
+  "Choose at least one speaker to export": "Выберите хотя бы один голос для экспорта",
+  "Could not play that audio file": "Не удалось воспроизвести аудиофайл",
+  "Could not prepare audio preview": "Не удалось подготовить превью аудио",
+  "Create a speaker first": "Сначала создайте голос",
+  "Download stopped": "Загрузка остановлена",
+  "Downloading standard voice pack…": "Скачиваю стандартный войспак…",
+  "Drop a reference voice before saving this identity": "Добавьте референс-голос перед сохранением",
+  "Drop a reference voice first": "Сначала добавьте референс-голос",
+  "Drop an audio file first": "Сначала добавьте аудиофайл",
+  "Engine dependency missing. Opened repair details.": "Не хватает зависимости движка. Открыл детали для починки.",
+  "History cleared": "История очищена",
+  "Loaded queued item for editing": "Элемент очереди загружен для редактирования",
+  "Model unloaded": "Модель выгружена",
+  "No saved speakers to export": "Нет сохранённых голосов для экспорта",
+  "Please enter text to speak (one clip per line)": "Введите текст (одна строка = один клип)",
+  "Queue cleared": "Очередь очищена",
+  "Queued item deleted": "Элемент очереди удалён",
+  "Select a model first": "Сначала выберите модель",
+  "Select a saved speaker identity first": "Сначала выберите сохранённый голос",
+  "Select a speaker identity to delete": "Выберите голос для удаления",
+  "Select a whisper model in Settings first": "Сначала выберите модель Whisper в настройках",
+  "Speaker identity deleted": "Голос удалён",
+  "Streaming needs an updated Higgs engine DLL; current DLL falls back to normal generation.":
+    "Для стриминга нужен обновлённый DLL движка; текущий откатывается к обычной генерации.",
+  "That speaker identity has no reference audio": "У этого голоса нет референс-аудио",
+  "Use lines like [Speaker1] text to import a script": "Используйте строки вида [Speaker1] текст для импорта сценария",
+  "Whisper model downloaded": "Модель Whisper скачана",
+  "Standard voices already imported": "Стандартные голоса уже добавлены",
 };
 
 // Translate a dynamic string. Returns Russian when in RU mode and known,

@@ -203,7 +203,7 @@ let toastTimer: number | null = null;
 
 function showToast(message: string, tone: "success" | "warning" | "error" = "success"): void {
   const toast = el<HTMLDivElement>("#toast");
-  toast.textContent = message;
+  toast.textContent = t(message);
   toast.className = "toast";
   if (tone !== "success") toast.classList.add(tone);
   toast.classList.add("show");
@@ -378,10 +378,10 @@ async function refreshSetupWizardState(): Promise<void> {
   let engineReady = Boolean(engineStatus?.engineLoaded);
   let enginePathValid = Boolean(engineStatus?.engineLoaded);
   let engineDetail = engineStatus?.engineLoaded
-    ? "Loaded and ready"
+    ? t("Loaded and ready")
     : enginePath
-      ? `Found: ${enginePath}`
-      : "Not found. Download the engine package or browse to audiocpp_engine.dll.";
+      ? `${t("Found:")} ${enginePath}`
+      : t("Not found. Download the engine package or browse to audiocpp_engine.dll.");
   if (!engineReady && enginePath) {
     let diagnostic = await diagnoseEngineForPath(enginePath);
     if (!diagnostic && savedEnginePath && bundledEnginePath) {
@@ -392,12 +392,14 @@ async function refreshSetupWizardState(): Promise<void> {
     enginePathValid = Boolean(diagnostic);
     engineReady = Boolean(diagnostic?.ok);
     if (!diagnostic && savedEnginePath) {
-      engineDetail = `Saved engine path not found: ${savedEnginePath}`;
+      engineDetail = `${t("Saved engine path not found:")} ${savedEnginePath}`;
     } else if (diagnostic?.ok) {
-      engineDetail = `Found: ${enginePath}`;
+      engineDetail = `${t("Found:")} ${enginePath}`;
     }
     if (diagnostic && !diagnostic.ok) {
-      engineDetail = `Found engine, but missing ${diagnostic.missing.length} required runtime DLL${diagnostic.missing.length === 1 ? "" : "s"}.`;
+      engineDetail = getLang() === "ru"
+        ? `Движок найден, но не хватает ${diagnostic.missing.length} системных DLL.`
+        : `Found engine, but missing ${diagnostic.missing.length} required runtime DLL${diagnostic.missing.length === 1 ? "" : "s"}.`;
     }
   }
   setSetupCheck(
@@ -426,12 +428,14 @@ async function refreshSetupWizardState(): Promise<void> {
   }
   const modelReady = Boolean(engineStatus?.modelLoaded || selectedModel || models.length > 0);
   const modelDetail = engineStatus?.modelLoaded
-    ? "Loaded and ready"
+    ? t("Loaded and ready")
     : selectedModel
-      ? `Selected: ${selectedModel}`
+      ? `${t("Selected:")} ${selectedModel}`
       : models.length > 0
-        ? `${models.length} model folder${models.length === 1 ? "" : "s"} found. Select or load one.`
-        : "No Higgs model folder found. Download a model folder or browse to one.";
+        ? (getLang() === "ru"
+            ? `Найдено папок моделей: ${models.length}. Выберите или загрузите.`
+            : `${models.length} model folder${models.length === 1 ? "" : "s"} found. Select or load one.`)
+        : t("No Higgs model folder found. Download a model folder or browse to one.");
   setSetupCheck(
     "#setup-check-model",
     "#setup-model-icon",
@@ -449,15 +453,15 @@ async function refreshSetupWizardState(): Promise<void> {
     "#setup-whisper-detail",
     whisperPath ? "ready" : "optional",
     whisperPath ? "✓" : "i",
-    whisperPath ? `Selected: ${whisperPath}` : "Optional. Download only if you want auto-transcription.",
+    whisperPath ? `${t("Selected:")} ${whisperPath}` : t("Optional. Download only if you want auto-transcription."),
   );
 
   const readyCount = Number(engineReady) + Number(modelReady);
   setText(
     "#setup-wizard-summary",
     readyCount === 2
-      ? "Core setup found. You can load anything not already loaded, or close this wizard."
-      : "Some core setup files are missing. Use Browse if you already have them, or Download to fetch them.",
+      ? t("Core setup found. You can load anything not already loaded, or close this wizard.")
+      : t("Some core setup files are missing. Use Browse if you already have them, or Download to fetch them."),
   );
 }
 
