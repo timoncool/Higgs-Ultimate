@@ -1298,6 +1298,14 @@ fn unload_asr() {
     parakeet::unload();
 }
 
+/// Level-match a generated WAV clip to a target integrated loudness (LUFS).
+#[tauri::command]
+fn normalize_wav(wav_base64: String, target_lufs: Option<f64>) -> Result<String, String> {
+    let bytes = base64_decode(&wav_base64).map_err(|e| e.to_string())?;
+    let out = audio::normalize_wav_bytes(&bytes, target_lufs.unwrap_or(-20.0))?;
+    Ok(base64_encode(&out))
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Model listing / download
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3911,8 +3919,10 @@ pub fn run() {
             generate_finish_sentence,
             transcribe_audio,
             unload_asr,
+            normalize_wav,
             recorder::start_recording,
             recorder::stop_recording,
+            recorder::list_input_devices,
             list_models,
             download_model,
             download_control,

@@ -2077,24 +2077,89 @@ async function applyGalleryReference(path: string, name: string): Promise<void> 
 // Parakeet auto-transcription runs exactly as for an uploaded reference.
 let activeRecordButton: string | null = null;
 let recordingSpeakerId: string | null = null;
+let selectedMicDevice = localStorage.getItem("higgsAudio.micDevice") || "";
+let activeRecMeterFill: HTMLElement | null = null;
+let recLevelListenerReady = false;
+
+// Live input-level meter: the Rust recorder emits `rec-level` (peak 0..1).
+function setupRecLevelListener(): void {
+  if (recLevelListenerReady) return;
+  recLevelListenerReady = true;
+  void listen<number>("rec-level", (e) => {
+    if (activeRecMeterFill) {
+      const pct = Math.round(Math.min(1, Math.max(0, e.payload)) * 100);
+      activeRecMeterFill.style.width = `${pct}%`;
+    }
+  });
+}
+
+async function populateMicSelects(): Promise<void> {
+  let devices: string[] = [];
+  try {
+    devices = await invoke<string[]>("list_input_devices");
+  } catch {
+    devices = [];
+  }
+  if ((!selectedMicDevice || !devices.includes(selectedMicDevice)) && devices.length) {
+    selectedMicDevice = devices[0];
+  }
+  for (const sel of document.querySelectorAll<HTMLSelectElement>(".mic-select")) {
+    sel.innerHTML = "";
+    for (const d of devices) {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = d;
+      sel.appendChild(opt);
+    }
+    sel.value = selectedMicDevice;
+    sel.onchange = () => {
+      selectedMicDevice = sel.value;
+      localStorage.setItem("higgsAudio.micDevice", selectedMicDevice);
+      for (const other of document.querySelectorAll<HTMLSelectElement>(".mic-select")) {
+        other.value = selectedMicDevice;
+      }
+    };
+  }
+}
+
+function startRecMeter(fill: HTMLElement | null): void {
+  activeRecMeterFill = fill;
+  if (fill) {
+    fill.style.width = "0%";
+    fill.closest(".rec-meter")?.classList.add("active");
+  }
+}
+function stopRecMeter(): void {
+  if (activeRecMeterFill) {
+    activeRecMeterFill.style.width = "0%";
+    activeRecMeterFill.closest(".rec-meter")?.classList.remove("active");
+  }
+  activeRecMeterFill = null;
+}
+function recMeterFillFor(el: HTMLElement): HTMLElement | null {
+  return el.closest(".record-row")?.querySelector<HTMLElement>(".rec-meter-fill") || null;
+}
+
 function wireRecordButton(
   btnId: string,
   onWav: (path: string, name: string) => void | Promise<void>,
 ): void {
   const btn = document.querySelector<HTMLButtonElement>(btnId);
   if (!btn) return;
+  setupRecLevelListener();
   btn.addEventListener("click", async () => {
     const isRecording = activeRecordButton === btnId;
     if (!isRecording) {
-      if (activeRecordButton) {
+      if (activeRecordButton || recordingSpeakerId) {
         showToast("Already recording — stop it first", "warning");
         return;
       }
       try {
-        await invoke("start_recording");
+        await invoke("start_recording", { device: selectedMicDevice || null });
         activeRecordButton = btnId;
         btn.textContent = t("⏹ Stop");
         btn.classList.add("recording");
+        startRecMeter(recMeterFillFor(btn));
       } catch (e) {
         showToast(`Microphone error: ${e}`, "error");
       }
@@ -2102,6 +2167,7 @@ function wireRecordButton(
       activeRecordButton = null;
       btn.textContent = t("🎤 Record voice");
       btn.classList.remove("recording");
+      stopRecMeter();
       try {
         const wavPath = await invoke<string>("stop_recording");
         await onWav(wavPath, "recording.wav");
@@ -2894,6 +2960,7 @@ function renderMultiSpeakers(): void {
         </div>
         <div class="record-row">
           <button class="compact-button ${recordingSpeakerId === speaker.id ? "recording" : ""}" data-action="record-speaker" type="button">${recordingSpeakerId === speaker.id ? t("⏹ Stop") : t("🎤 Record voice")}</button>
+          <span class="rec-meter ${recordingSpeakerId === speaker.id ? "active" : ""}"><span class="rec-meter-fill"></span></span>
         </div>
         <label class="field-label transcript-label">Reference transcript</label>
         <textarea class="text-area" data-field="speaker-transcript" rows="2" placeholder="Optional. Auto-filled with Parakeet when available.">${escapeHtml(speaker.refText)}</textarea>
@@ -3243,6 +3310,7 @@ function initMultiSpeakerWorkflow(): void {
     } else if (action === "record-speaker") {
       if (recordingSpeakerId === speaker.id) {
         recordingSpeakerId = null;
+        stopRecMeter();
         try {
           const wav = await invoke<string>("stop_recording");
           const prepared = await prepareReferenceAudioFile(wav, "recording.wav");
@@ -3258,9 +3326,15 @@ function initMultiSpeakerWorkflow(): void {
         showToast("Already recording — stop it first", "warning");
       } else {
         try {
-          await invoke("start_recording");
+          setupRecLevelListener();
+          await invoke("start_recording", { device: selectedMicDevice || null });
           recordingSpeakerId = speaker.id;
           renderMultiSpeakers();
+          startRecMeter(
+            document.querySelector<HTMLElement>(
+              `.speaker-card[data-speaker-id="${speaker.id}"] .rec-meter-fill`,
+            ),
+          );
         } catch (e) {
           showToast(`Microphone error: ${e}`, "error");
         }
@@ -3955,6 +4029,18 @@ async function resolveMultiLineReference(
   };
 }
 
+// Level-match a clip to a common loudness (EBU R128, ~-20 LUFS) so segments
+// built from references of different volume sound consistent when concatenated.
+async function normalizeResultLoudness(result: GenerationResult, targetLufs = -20): Promise<GenerationResult> {
+  try {
+    const wavBase64 = await invoke<string>("normalize_wav", { wavBase64: result.wavBase64, targetLufs });
+    return { ...result, wavBase64 };
+  } catch (e) {
+    console.warn("Loudness normalize failed", e);
+    return result;
+  }
+}
+
 async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "multi"; speakers: MultiSpeaker[]; lines: MultiLine[] } }): Promise<GenerationResult> {
   const options = job.options;
   const lines = job.payload.lines;
@@ -3985,7 +4071,9 @@ async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "
     outputs.push(result);
     setProgress("#gen-progress-bar", i + 1, lines.length);
   }
-  return concatenateWavResults(outputs, speakerPause);
+  // Level-match every speaker segment to a common loudness before joining.
+  const leveled = await Promise.all(outputs.map((r) => normalizeResultLoudness(r)));
+  return concatenateWavResults(leveled, speakerPause);
 }
 
 async function generateJobAudio(job: GenerationJob): Promise<GenerationResult> {
@@ -4033,7 +4121,12 @@ async function generateJobAudio(job: GenerationJob): Promise<GenerationResult> {
         audioPath: payload.refPath,
         targetSampleRate: result.sampleRate,
       });
-      result = concatenateWavResults([source, result]);
+      // Match the continuation's loudness to the source clip so the join is seamless.
+      const [nsrc, nres] = await Promise.all([
+        normalizeResultLoudness(source),
+        normalizeResultLoudness(result),
+      ]);
+      result = concatenateWavResults([nsrc, nres]);
     }
     return result;
   }
@@ -5574,6 +5667,8 @@ async function main(): Promise<void> {
   initGenerate();
   initAudioPlayer();
   initBatchTab();
+  setupRecLevelListener();
+  void populateMicSelects();
   initDownload();
   initSetupWizard();
   initTextCounting();

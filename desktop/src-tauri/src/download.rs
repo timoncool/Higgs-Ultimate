@@ -113,7 +113,7 @@ pub fn download_file(
     if !control.begin() {
         return Err(DownloadError::Busy);
     }
-    let result = download_file_inner(url, dest_dir, filename, app, &control);
+    let result = download_file_inner(url, dest_dir, filename, app, control.clone());
     control.finish();
     result
 }
@@ -148,12 +148,255 @@ fn emit_download_progress(
     );
 }
 
+// Parallelize downloads of files ≥ this size across this many connections.
+// A single HTTP stream does not saturate a fast link against the HF CDN; N
+// concurrent byte-range requests do (aria2-style).
+const PARALLEL_MIN_SIZE: u64 = 16 * 1024 * 1024;
+const PARALLEL_CONNS: u64 = 8;
+
+#[cfg(windows)]
+fn write_at(f: &File, buf: &[u8], off: u64) -> std::io::Result<usize> {
+    use std::os::windows::fs::FileExt;
+    f.seek_write(buf, off)
+}
+#[cfg(not(windows))]
+fn write_at(f: &File, buf: &[u8], off: u64) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    f.write_at(buf, off)
+}
+
+/// Learn the file size and whether the (possibly redirected) server honours
+/// byte ranges, via a 1-byte ranged probe. HF's CDN returns 206 + content-range.
+fn probe_size(url: &str) -> (u64, bool) {
+    match ureq::get(url).header("Range", "bytes=0-0").call() {
+        Ok(resp) => {
+            if resp.status().as_u16() == 206 {
+                let total = resp
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.rsplit('/').next())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .unwrap_or(0);
+                (total, total > 0)
+            } else {
+                let total = resp
+                    .headers()
+                    .get("content-length")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                (total, false)
+            }
+        }
+        Err(_) => (0, false),
+    }
+}
+
+fn download_range(
+    url: &str,
+    file: &Arc<File>,
+    start: u64,
+    end: u64,
+    downloaded: &Arc<AtomicU64>,
+    control: &DownloadControl,
+    abort: &Arc<AtomicBool>,
+) -> Result<(), DownloadError> {
+    let resp = ureq::get(url)
+        .header("Range", &format!("bytes={start}-{end}"))
+        .call()
+        .map_err(|e| DownloadError::Http(e.to_string()))?;
+    let mut reader = resp.into_body().into_reader();
+    let mut buf = [0u8; 262144];
+    let mut offset = start;
+    loop {
+        if control.is_cancelled() || abort.load(Ordering::Relaxed) {
+            return Err(DownloadError::Cancelled);
+        }
+        while control.is_paused() {
+            if control.is_cancelled() || abort.load(Ordering::Relaxed) {
+                return Err(DownloadError::Cancelled);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| DownloadError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        let mut w = 0;
+        while w < n {
+            let k = write_at(file, &buf[w..n], offset + w as u64)
+                .map_err(|e| DownloadError::Io(e.to_string()))?;
+            if k == 0 {
+                return Err(DownloadError::Io("short write".into()));
+            }
+            w += k;
+        }
+        offset += n as u64;
+        downloaded.fetch_add(n as u64, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+fn download_parallel(
+    url: &str,
+    tmp_path: &Path,
+    total: u64,
+    app: &AppHandle,
+    control: &Arc<DownloadControl>,
+) -> Result<u64, DownloadError> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(tmp_path)
+        .map_err(|e| DownloadError::Io(e.to_string()))?;
+    file.set_len(total)
+        .map_err(|e| DownloadError::Io(e.to_string()))?;
+    let file = Arc::new(file);
+
+    let conns = PARALLEL_CONNS.min((total / (4 * 1024 * 1024)).max(1)).max(1);
+    let chunk = total / conns;
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let finished = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let abort = Arc::new(AtomicBool::new(false));
+    let error: Arc<std::sync::Mutex<Option<DownloadError>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let mut handles = Vec::new();
+    for i in 0..conns {
+        let start = i * chunk;
+        let end = if i == conns - 1 { total - 1 } else { start + chunk - 1 };
+        let url = url.to_string();
+        let file = file.clone();
+        let downloaded = downloaded.clone();
+        let finished = finished.clone();
+        let abort = abort.clone();
+        let error = error.clone();
+        let control = control.clone();
+        handles.push(std::thread::spawn(move || {
+            if let Err(e) = download_range(&url, &file, start, end, &downloaded, &control, &abort) {
+                if !matches!(e, DownloadError::Cancelled) {
+                    abort.store(true, Ordering::Relaxed); // stop siblings
+                    let mut slot = error.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(e);
+                    }
+                }
+            }
+            finished.fetch_add(1, Ordering::SeqCst);
+        }));
+    }
+
+    let start_time = std::time::Instant::now();
+    loop {
+        let got = downloaded.load(Ordering::Relaxed);
+        if control.is_cancelled() {
+            abort.store(true, Ordering::Relaxed);
+        }
+        let status = if control.is_paused() { "paused" } else { "running" };
+        emit_download_progress(app, got, total, start_time, status);
+        if finished.load(Ordering::SeqCst) >= conns as usize {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    for h in handles {
+        let _ = h.join();
+    }
+
+    if let Some(e) = error.lock().unwrap().take() {
+        let _ = std::fs::remove_file(tmp_path);
+        return Err(e);
+    }
+    if control.is_cancelled() {
+        let _ = std::fs::remove_file(tmp_path);
+        emit_download_progress(app, downloaded.load(Ordering::Relaxed), total, start_time, "cancelled");
+        return Err(DownloadError::Cancelled);
+    }
+    Ok(total)
+}
+
+fn download_single(
+    url: &str,
+    tmp_path: &Path,
+    dest_path: &Path,
+    control: &DownloadControl,
+    app: &AppHandle,
+) -> Result<DownloadResult, DownloadError> {
+    let response = ureq::get(url)
+        .call()
+        .map_err(|e| DownloadError::Http(e.to_string()))?;
+    let total = response
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let mut reader = response.into_body().into_reader();
+    let file = File::create(tmp_path).map_err(|e| DownloadError::Io(e.to_string()))?;
+    let mut writer = BufWriter::new(file);
+
+    let start_time = std::time::Instant::now();
+    let mut buf = [0u8; 262144];
+    let mut local_written: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+
+    loop {
+        if control.is_cancelled() {
+            drop(writer);
+            let _ = std::fs::remove_file(tmp_path);
+            emit_download_progress(app, local_written, total, start_time, "cancelled");
+            return Err(DownloadError::Cancelled);
+        }
+        while control.is_paused() {
+            if control.is_cancelled() {
+                drop(writer);
+                let _ = std::fs::remove_file(tmp_path);
+                emit_download_progress(app, local_written, total, start_time, "cancelled");
+                return Err(DownloadError::Cancelled);
+            }
+            if last_emit.elapsed().as_millis() > 500 {
+                last_emit = std::time::Instant::now();
+                emit_download_progress(app, local_written, total, start_time, "paused");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| DownloadError::Io(e.to_string()))?;
+        if n == 0 {
+            break;
+        }
+        writer
+            .write_all(&buf[..n])
+            .map_err(|e| DownloadError::Io(e.to_string()))?;
+        local_written += n as u64;
+        if last_emit.elapsed().as_millis() > 200 {
+            last_emit = std::time::Instant::now();
+            emit_download_progress(app, local_written, total, start_time, "running");
+        }
+    }
+
+    writer.flush().map_err(|e| DownloadError::Io(e.to_string()))?;
+    drop(writer);
+    std::fs::rename(tmp_path, dest_path).map_err(|e| DownloadError::Io(e.to_string()))?;
+    emit_download_progress(app, local_written, total, start_time, "complete");
+    Ok(DownloadResult {
+        path: dest_path.to_string_lossy().into_owned(),
+        size: local_written,
+    })
+}
+
 fn download_file_inner(
     url: &str,
     dest_dir: &Path,
     filename: Option<&str>,
     app: &AppHandle,
-    control: &DownloadControl,
+    control: Arc<DownloadControl>,
 ) -> Result<DownloadResult, DownloadError> {
     if url.is_empty() || !url.starts_with("http") {
         return Err(DownloadError::InvalidUrl("URL must start with http".into()));
@@ -171,80 +414,27 @@ fn download_file_inner(
     let dest_path = dest_dir.join(&filename);
     let tmp_path = dest_dir.join(format!("{filename}.tmp"));
 
-    let response = ureq::get(url)
-        .call()
-        .map_err(|e| DownloadError::Http(e.to_string()))?;
-
-    let total = response
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
-
-    let mut reader = response.into_body().into_reader();
-    let file = File::create(&tmp_path).map_err(|e| DownloadError::Io(e.to_string()))?;
-    let mut writer = BufWriter::new(file);
-
-    let downloaded = Arc::new(AtomicU64::new(0));
-    let start_time = std::time::Instant::now();
-    let mut buf = [0u8; 262144];
-    let mut local_written: u64 = 0;
-    let mut last_emit = std::time::Instant::now();
-
-    loop {
-        if control.is_cancelled() {
-            drop(writer);
-            let _ = std::fs::remove_file(&tmp_path);
-            emit_download_progress(app, local_written, total, start_time, "cancelled");
-            return Err(DownloadError::Cancelled);
-        }
-
-        while control.is_paused() {
-            if control.is_cancelled() {
-                drop(writer);
-                let _ = std::fs::remove_file(&tmp_path);
-                emit_download_progress(app, local_written, total, start_time, "cancelled");
-                return Err(DownloadError::Cancelled);
+    // Fast path: parallel byte-range download for large, range-capable files.
+    let (total, ranges_ok) = probe_size(url);
+    if ranges_ok && total >= PARALLEL_MIN_SIZE {
+        match download_parallel(url, &tmp_path, total, app, &control) {
+            Ok(size) => {
+                std::fs::rename(&tmp_path, &dest_path)
+                    .map_err(|e| DownloadError::Io(e.to_string()))?;
+                emit_download_progress(app, size, total, std::time::Instant::now(), "complete");
+                return Ok(DownloadResult {
+                    path: dest_path.to_string_lossy().into_owned(),
+                    size,
+                });
             }
-            if last_emit.elapsed().as_millis() > 500 {
-                last_emit = std::time::Instant::now();
-                emit_download_progress(app, local_written, total, start_time, "paused");
+            Err(DownloadError::Cancelled) => return Err(DownloadError::Cancelled),
+            Err(_) => {
+                let _ = std::fs::remove_file(&tmp_path); // fall back to single stream
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-
-        let n = reader
-            .read(&mut buf)
-            .map_err(|e| DownloadError::Io(e.to_string()))?;
-        if n == 0 {
-            break;
-        }
-        writer
-            .write_all(&buf[..n])
-            .map_err(|e| DownloadError::Io(e.to_string()))?;
-        local_written += n as u64;
-        downloaded.store(local_written, Ordering::Relaxed);
-
-        if last_emit.elapsed().as_millis() > 200 {
-            last_emit = std::time::Instant::now();
-            emit_download_progress(app, local_written, total, start_time, "running");
         }
     }
 
-    writer
-        .flush()
-        .map_err(|e| DownloadError::Io(e.to_string()))?;
-    drop(writer);
-
-    std::fs::rename(&tmp_path, &dest_path).map_err(|e| DownloadError::Io(e.to_string()))?;
-
-    emit_download_progress(app, local_written, total, start_time, "complete");
-
-    Ok(DownloadResult {
-        path: dest_path.to_string_lossy().into_owned(),
-        size: local_written,
-    })
+    download_single(url, &tmp_path, &dest_path, &control, app)
 }
 
 pub fn list_model_dirs(models_root: &Path) -> Vec<ModelListing> {

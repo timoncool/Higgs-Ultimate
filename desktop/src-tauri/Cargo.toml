@@ -18,6 +18,9 @@ tauri-build = { version = "2", features = [] }
 # getUserMedia is flaky). Same crates the Tauri recorder plugins use.
 cpal = "0.15"
 hound = "3.5"
+# EBU R128 / LUFS loudness measurement to level-match multi-speaker segments and
+# continuation clips to a common loudness (references come at different volumes).
+ebur128 = "0.1"
 libloading = "0.8"
 nvml-wrapper = "0.10"
 serde = { version = "1", features = ["derive"] }

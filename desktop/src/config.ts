@@ -79,6 +79,12 @@ export const HIGGS_MODEL_PRESETS: TtsModelPreset[] = [
   },
 ];
 
+// Parakeet quants from mudler/parakeet-cpp-gguf (all multilingual, incl. RU).
+// Same idea as the Higgs TTS quant picker — choose size/quality in the UI.
 export const WHISPER_MODEL_PRESETS: WhisperModelPreset[] = [
-  { id: "tdt-0.6b-v3-q8_0", size: "940 MB · рус/мультиязычный", sha: "", recommended: true },
+  { id: "tdt-0.6b-v3-q4_k", size: "~560 MB · самый лёгкий", sha: "" },
+  { id: "tdt-0.6b-v3-q5_k", size: "~640 MB", sha: "" },
+  { id: "tdt-0.6b-v3-q6_k", size: "~730 MB", sha: "" },
+  { id: "tdt-0.6b-v3-q8_0", size: "940 MB · рекомендуется", sha: "", recommended: true },
+  { id: "tdt-0.6b-v3-f16", size: "~1.2 GB · максимум качества", sha: "" },
 ];

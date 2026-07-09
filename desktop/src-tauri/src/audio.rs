@@ -347,3 +347,57 @@ pub fn encode_pcm16_wav(samples: &[f32], sample_rate: i32, channels: i32) -> Vec
     }
     out
 }
+
+/// Normalize a 16-bit PCM WAV to a target integrated loudness (LUFS, EBU R128),
+/// with a peak guard so the gain never clips. Used to level-match multi-speaker
+/// segments and continuation clips whose source references differ in volume.
+pub fn normalize_wav_bytes(wav: &[u8], target_lufs: f64) -> Result<Vec<u8>, String> {
+    use std::io::Cursor;
+    let mut reader =
+        hound::WavReader::new(Cursor::new(wav)).map_err(|e| format!("read wav: {e}"))?;
+    let spec = reader.spec();
+    let samples: Vec<i16> = reader
+        .samples::<i16>()
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("decode wav: {e}"))?;
+    if samples.is_empty() {
+        return Ok(wav.to_vec());
+    }
+
+    let mut ebu = ebur128::EbuR128::new(
+        spec.channels as u32,
+        spec.sample_rate,
+        ebur128::Mode::I,
+    )
+    .map_err(|e| format!("ebur128: {e}"))?;
+    ebu.add_frames_i16(&samples)
+        .map_err(|e| format!("ebur128 frames: {e}"))?;
+    let loudness = ebu.loudness_global().unwrap_or(f64::NEG_INFINITY);
+    if !loudness.is_finite() {
+        // Silence / too short to measure — leave untouched.
+        return Ok(wav.to_vec());
+    }
+
+    let gain = 10f64.powf((target_lufs - loudness) / 20.0);
+    // Peak guard: scale the gain down if it would push any sample past full scale.
+    let mut peak = 0f64;
+    for &s in &samples {
+        let v = (s as f64 / 32768.0 * gain).abs();
+        if v > peak {
+            peak = v;
+        }
+    }
+    let g = if peak > 0.99 { gain * (0.99 / peak) } else { gain };
+
+    let mut out = Cursor::new(Vec::new());
+    {
+        let mut writer =
+            hound::WavWriter::new(&mut out, spec).map_err(|e| format!("write wav: {e}"))?;
+        for &s in &samples {
+            let v = ((s as f64) * g).clamp(-32768.0, 32767.0) as i16;
+            writer.write_sample(v).map_err(|e| format!("write sample: {e}"))?;
+        }
+        writer.finalize().map_err(|e| format!("finalize wav: {e}"))?;
+    }
+    Ok(out.into_inner())
+}
