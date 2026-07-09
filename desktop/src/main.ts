@@ -225,7 +225,7 @@ function renderDependencyList(container: HTMLElement, deps: EngineDependencyStat
   if (!deps.length) {
     const empty = document.createElement("div");
     empty.className = `engine-diagnostic-item ${statusClass}`;
-    empty.innerHTML = `<strong>${statusClass === "missing" ? "None" : "Nothing detected yet"}</strong>`;
+    empty.innerHTML = `<strong>${statusClass === "missing" ? t("None") : t("Nothing detected yet")}</strong>`;
     container.appendChild(empty);
     return;
   }
@@ -2315,7 +2315,7 @@ function renderSpeakerGalleryList(): void {
   if (speakerPersonas.length === 0) {
     const empty = document.createElement("div");
     empty.className = "speaker-gallery-empty";
-    empty.textContent = "No saved speakers yet";
+    empty.textContent = t("No saved speakers yet");
     list.appendChild(empty);
     return;
   }
@@ -2333,6 +2333,7 @@ function renderSpeakerGalleryList(): void {
     `;
     list.appendChild(item);
   }
+  translateStaticDom(list);
 }
 
 function renderSpeakerGalleryEditor(): void {
@@ -2846,6 +2847,7 @@ function renderMultiSpeakers(): void {
       </div>`;
     list.appendChild(card);
   }
+  translateStaticDom(list);
 }
 
 function renderMultiLines(): void {
@@ -2877,6 +2879,7 @@ function renderMultiLines(): void {
       </div>`;
     list.appendChild(item);
   });
+  translateStaticDom(list);
 }
 
 function renderMultiWorkflow(): void {
@@ -3556,7 +3559,7 @@ function renderQueuePanel(): void {
   if (generationQueue.length === 0 && externalJobs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
-    empty.textContent = "No queued generations";
+    empty.textContent = t("No queued generations");
     list.appendChild(empty);
   } else {
     generationQueue.forEach((job, index) => {
@@ -3595,6 +3598,7 @@ function renderQueuePanel(): void {
       list.appendChild(item);
     });
   }
+  translateStaticDom(list);
   el<HTMLButtonElement>("#queue-clear-btn").disabled = generationQueue.length === 0;
 }
 
@@ -4671,7 +4675,7 @@ function addHistory(mode: Mode, label: string, result: GenerationResult): void {
 function renderHistory(): void {
   const list = el<HTMLElement>("#recent-list");
   if (history.length === 0) {
-    list.innerHTML = '<p class="empty-state">No generations yet</p>';
+    list.innerHTML = `<p class="empty-state">${t("No generations yet")}</p>`;
     el<HTMLElement>("#history-clear-all").classList.add("hidden");
     return;
   }

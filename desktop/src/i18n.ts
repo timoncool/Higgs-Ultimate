@@ -378,6 +378,27 @@ export const RU: Record<string, string> = {
   "Use lines like [Speaker1] text to import a script": "Используйте строки вида [Speaker1] текст для импорта сценария",
   "Whisper model downloaded": "Модель Whisper скачана",
   "Standard voices already imported": "Стандартные голоса уже добавлены",
+
+  // ── Dynamically rendered cards (multi-speaker, gallery, queue) ──
+  "No saved speakers yet": "Пока нет сохранённых голосов",
+  "No reference audio": "Нет референс-аудио",
+  "No queued generations": "Очередь пуста",
+  "Nothing detected yet": "Пока ничего не найдено",
+  "Edit": "Править",
+  "API request": "API-запрос",
+  "Use saved identity…": "Выбрать сохранённый голос…",
+  "Drop reference voice, or click to browse": "Перетащите референс-голос или нажмите для выбора",
+  "Optional line-specific reference voice": "Необязательный референс для этой реплики",
+  "Optional. Auto-filled with Whisper when available.": "Необязательно. Автозаполнение через Whisper, если доступно.",
+  "Optional notes for this identity": "Необязательные заметки об этом голосе",
+  "Collapse speaker": "Свернуть спикера",
+  "Expand speaker": "Развернуть спикера",
+  "Drag line": "Перетащить реплику",
+  "Hide reference": "Скрыть референс",
+  "Reference": "Референс",
+  "Text to speak for this line...": "Текст этой реплики…",
+  "Reference transcript override": "Переопределение транскрипта",
+  "Leave blank to use the selected speaker transcript.": "Оставьте пустым — возьмётся транскрипт выбранного спикера.",
 };
 
 // Translate a dynamic string. Returns Russian when in RU mode and known,
