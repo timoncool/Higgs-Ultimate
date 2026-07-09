@@ -1,88 +1,106 @@
-# Higgs Ultimate — русская портативная версия (движок Higgs Audio v3)
+<div align="center">
 
-[![Stars](https://img.shields.io/github/stars/timoncool/Higgs-Audio-v3-Studio-rus?style=social)](https://github.com/timoncool/Higgs-Audio-v3-Studio-rus/stargazers)
-[![License](https://img.shields.io/github/license/timoncool/Higgs-Audio-v3-Studio-rus)](LICENSE)
+# Higgs Ultimate
 
-Мощный нейросетевой синтез речи (TTS), клонирование голоса и продолжение аудио на движке **Higgs Audio v3** — в полностью **портативной** сборке с **русским интерфейсом**.
+**Портативная нейросеть для синтеза и клонирования речи на Windows — на нативном движке Higgs Audio v3, полностью офлайн, с русским интерфейсом.**
 
-Это форк отличного проекта [**Saganaki22/Higgs-Audio-v3-Studio**](https://github.com/Saganaki22/Higgs-Audio-v3-Studio) (нативный C++/CUDA-движок `audiocpp`, обёртка на Tauri). Огромная благодарность автору за движок и приложение 🙏 — вся тяжёлая работа по портированию Higgs Audio на быстрый нативный движок сделана им.
+[![License](https://img.shields.io/github/license/timoncool/Higgs-Ultimate?style=flat-square)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/timoncool/Higgs-Ultimate?style=flat-square)](https://github.com/timoncool/Higgs-Ultimate/stargazers)
+[![Last Commit](https://img.shields.io/github/last-commit/timoncool/Higgs-Ultimate?style=flat-square)](https://github.com/timoncool/Higgs-Ultimate/commits)
+[![Downloads](https://img.shields.io/github/downloads/timoncool/Higgs-Ultimate/total?style=flat-square)](https://github.com/timoncool/Higgs-Ultimate/releases)
 
-> Оригинальный README на английском: [README_EN.md](README_EN.md).
+![Higgs Ultimate](docs/screenshots/hero.png)
 
-## Что добавлено в этой версии
+</div>
 
-- 🇷🇺 **Русский интерфейс** (переключатель RU/EN в настройках, по умолчанию русский).
-- 📦 **Настоящая портативность** — модели, голоса, движок, настройки хранятся **рядом с `.exe`**, а не в профиле пользователя (`C:\Users\...`). Перенёс папку — перенёс всё; удалил папку — не осталось следов в системе.
-- 🔊 **Регулятор громкости** на плеере результата.
-- ⇉ **Пакетный режим** — каждая строка текста генерируется как отдельный клип (для TTS и клонирования голоса), все результаты попадают в Историю.
-- 🎙️ **Стандартный войспак** — кнопка «Стандартные голоса» в Галерее: одним нажатием скачивает и добавляет ~50 готовых референс-голосов.
-- 🩹 **Исправлена докачка моделей** — при вставке произвольной ссылки на GGUF теперь скачивается **вся папка модели** (веса + `config.json` + токенайзеры), а не только `.gguf`. Больше нет ошибки «missing config». Неполные папки помечаются «⚠ incomplete».
-- 🌍 **Мультиязычный Whisper** по умолчанию (для авто-транскрипта клонов на русском).
+## Что это
 
-## Возможности (из оригинала)
+**Higgs Ultimate** — русская портативная сборка нейросети синтеза речи на движке [Higgs Audio v3](https://huggingface.co/bosonai). Озвучивает текст, клонирует голос по короткому референсу, продолжает речь и собирает многоголосые диалоги — **100% локально, без интернета, облака и подписок**. Нативный C++/CUDA-движок (GGUF) — быстрый старт и низкое потребление VRAM, без тяжёлого Python-окружения.
 
-- Синтез речи (TTS), клонирование голоса из референса, продолжение речи, мультиспикер.
-- Галерея голосов: сохранение личностей с фото, транскриптом, экспорт/импорт.
-- Тонкая настройка: температура, top-k, top-p, seed, эмоция, стиль, скорость, тон, выразительность.
-- Разбивка длинного текста, стриминг воспроизведения, экспорт WAV/MP3.
-- Локальный HTTP API, монитор GPU (VRAM/загрузка/питание/RAM), тёмная/светлая тема.
+В отличие от оригинала — **полностью портативная**: всё (модели, голоса, движок, настройки) лежит рядом с `.exe`. Удалил папку — не осталось ни следа в системе. Плюс русский интерфейс, батч-режим, регулятор громкости и стартовый пак голосов.
 
-## Установка
+## Возможности
 
-1. Скачайте архив из [**Releases**](https://github.com/timoncool/Higgs-Audio-v3-Studio-rus/releases) и распакуйте в любую папку (например, `D:\Higgs-Audio-Studio`).
-2. Запустите `higgs-audio-studio.exe`.
-3. При первом запуске мастер поможет скачать **движок** (DLL) и **модель** — всё сохранится рядом с `.exe`.
-
-> Никакой установки в систему: Python/CUDA-тулкит не нужны, движок скачивается готовым.
+- **Синтез речи (TTS)** — нативный движок Higgs Audio v3, кванты от Q4 (8 ГБ VRAM) до BF16 (16 ГБ)
+- **Клонирование голоса** — по референс-аудио 30 сек, с авто-транскриптом через Whisper
+- **Продолжение речи** — модель договаривает начатую фразу в том же голосе
+- **Мультиспикер** — многоголосые диалоги с назначением голоса на реплику
+- **Галерея голосов** — сохранение голосов-персон, импорт/экспорт, фото и заметки
+- **Стартовый войспак** — пак голосов Nerual Dreming в один клик
+- **Пакетный режим** — отдельная вкладка: генерация пачки клипов из списка строк или `.txt` файлов
+- **Локальный API** — HTTP-сервер с потоковым NDJSON для интеграций
+- **Полностью портативная** — ничего не пишется в профиль пользователя
+- **Русский и английский интерфейс** — переключение на лету
 
 ## Системные требования
 
-- **ОС:** Windows 10/11 x64, установленный [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) (обычно уже есть).
-- **GPU:** NVIDIA с CUDA 13.x. Требования по VRAM зависят от кванта модели:
+- **ОС:** Windows 10 / 11 (x64)
+- **GPU:** NVIDIA с 8–16 ГБ VRAM (в зависимости от кванта модели)
+- **WebView2** — предустановлен в Windows 11 (в Windows 10 ставится автоматически)
+- **Место:** ~6 ГБ на модель (Q8_0)
 
-| Квант | VRAM |
-|-------|------|
-| Q4_K_M | ~8 ГБ |
-| Q5_K | ~9 ГБ |
-| Q6_K | ~10 ГБ |
-| **Q8_0 (рекомендуется)** | ~12 ГБ |
-| BF16 | ~16 ГБ |
+## Быстрый старт
 
-- Для работы движка может понадобиться [драйвер NVIDIA](https://www.nvidia.com/Download/index.aspx), [CUDA 13.x](https://developer.nvidia.com/cuda-downloads) и [VC++ Runtime](https://aka.ms/vs/17/release/vc_redist.x64.exe) — приложение подскажет, если чего-то не хватает.
+1. **Скачать** портативную сборку из [Releases](https://github.com/timoncool/Higgs-Ultimate/releases) и распаковать в любую папку.
 
-## Благодарность автору
+2. **Запустить** `Higgs Ultimate.exe`.
 
-Оригинальный проект, нативный движок `audiocpp` и приложение: [**Saganaki22/Higgs-Audio-v3-Studio**](https://github.com/Saganaki22/Higgs-Audio-v3-Studio) (лицензия Apache 2.0). Веса модели Higgs Audio — от [Boson AI](https://huggingface.co/bosonai) (исследовательская/некоммерческая лицензия). Спасибо за огромную работу!
+3. **В приложении:** нажать «Скачать DLL движка», затем «Скачать» модель (или «Обзор» — указать уже скачанную папку модели). Готово — можно генерировать.
+
+> Всё качается и хранится **внутри папки приложения**. Модели и голоса никуда больше не попадают.
+
+### Сборка из исходников
+
+```bash
+git clone https://github.com/timoncool/Higgs-Ultimate.git
+cd Higgs-Ultimate/desktop
+npm install
+npm run build          # tauri build → .exe
+```
+
+Требуется Node 20+, Rust (MSVC) и WebView2. Нативный движок (`audiocpp_engine.dll`) пересобирать не нужно — приложение скачивает готовый.
 
 ## Другие портативные нейросети
 
 | Проект | Описание |
 |--------|----------|
-| [HiggsAudio-Studio](https://github.com/timoncool/HiggsAudio-Studio) | Higgs Audio TTS + LLM-режиссёр (Python-версия) |
-| [Foundation Music Lab](https://github.com/timoncool/Foundation-Music-Lab) | Генерация музыки + таймлайн-редактор |
-| [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Распознавание речи (ASR) |
-| [LavaSR](https://github.com/timoncool/LavaSR_portable_ru) | Улучшение качества аудио |
-| [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Синтез речи (TTS) от Qwen |
-| [SuperCaption Qwen3-VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Генерация описаний изображений |
-| [VideoSOS](https://github.com/timoncool/videosos) | AI-видеопродакшн в браузере |
-| [RC Stable Audio Tools](https://github.com/timoncool/RC-stable-audio-tools-portable) | Генерация музыки и аудио |
+| [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) | AI-студия музыки — песни, вокал, каверы, клипы |
+| [Foundation Music Lab](https://github.com/timoncool/Foundation-Music-Lab) | Генерация музыки + редактор таймлайна |
+| [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Портативный TTS с клонированием голоса |
+| [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Портативное распознавание речи |
+| [LavaSR](https://github.com/timoncool/LavaSR_portable_ru) | Портативное улучшение аудио |
+| [SuperCaption Qwen3-VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Портативное описание изображений |
 
 ## Авторы
 
-- **Nerual Dreming** ([t.me/nerual_dreming](https://t.me/nerual_dreming)) — [neuro-cartel.com](https://neuro-cartel.com) | основатель [ArtGeneration.me](https://artgeneration.me)
-- **Нейро-Софт** ([t.me/neuroport](https://t.me/neuroport)) — репаки и портативки нейросетей
-- Оригинальный движок и приложение — **Saganaki22** ([Higgs-Audio-v3-Studio](https://github.com/Saganaki22/Higgs-Audio-v3-Studio))
+- **Nerual Dreming** — [Telegram](https://t.me/nerual_dreming) | [neuro-cartel.com](https://neuro-cartel.com) | [ArtGeneration.me](https://artgeneration.me)
+- **Нейро-Софт** — [Telegram](https://t.me/neuroport) | портативные нейросети
 
----
+## Благодарности
 
-> **Если проект полезен — поставьте звёздочку!** Это помогает другим находить проект и мотивирует на развитие.
+- **[Saganaki22](https://github.com/Saganaki22/Higgs-Audio-v3-Studio)** — оригинальное приложение Higgs Audio v3 Studio и нативный C++/CUDA-движок. Этот проект — форк с русской локализацией и полной портативностью. Огромное спасибо за движок и десктоп-оболочку.
+- **[Boson AI](https://huggingface.co/bosonai)** — модель Higgs Audio v3.
+
+## Поддержать автора
+
+Я создаю опенсорс софт и занимаюсь исследованиями в области ИИ. Большая часть всего, что я делаю, находится в открытом доступе. Ваши пожертвования позволяют мне создавать и исследовать больше, не отвлекаясь на поиск еды для продолжения существования =)
+
+**[Все способы поддержки](https://github.com/timoncool/ACE-Step-Studio/blob/master/DONATE.md)** | **[dalink.to/nerual_dreming](https://dalink.to/nerual_dreming)** | **[boosty.to/neuro_art](https://boosty.to/neuro_art)**
+
+- **BTC:** `1E7dHL22RpyhJGVpcvKdbyZgksSYkYeEBC`
+- **ETH (ERC20):** `0xb5db65adf478983186d4897ba92fe2c25c594a0c`
+- **USDT (TRC20):** `TQST9Lp2TjK6FiVkn4fwfGUee7NmkxEE7C`
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=timoncool%2FHiggs-Audio-v3-Studio-rus&type=date&legend=top-left">
+<a href="https://github.com/timoncool/Higgs-Ultimate/stargazers">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=timoncool/Higgs-Audio-v3-Studio-rus&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=timoncool/Higgs-Audio-v3-Studio-rus&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=timoncool/Higgs-Audio-v3-Studio-rus&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="docs/stars-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="docs/stars-light.svg" />
+   <img alt="Star History Chart" src="docs/stars-light.svg" />
  </picture>
 </a>
+
+## Лицензия
+
+Код приложения — [Apache-2.0](LICENSE) (© Saganaki22, форк © timoncool). Веса модели Higgs Audio v3 распространяются под research/non-commercial лицензией Boson AI — см. условия на [странице модели](https://huggingface.co/bosonai).
