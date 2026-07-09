@@ -222,6 +222,8 @@ export type RefPlayer = {
   waveformPath: string;
   waveformLoading: boolean;
   raf: number | null;
+  previewObjectUrl: string;
+  previewToken: number;
 };
 
 export type WavPcm = {

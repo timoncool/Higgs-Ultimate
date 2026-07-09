@@ -19,15 +19,23 @@ pub struct PreparedAudio {
 
 /// If the file is already a WAV, return the path as-is.
 /// Otherwise, decode it with symphonia and write a temp WAV, return that path.
+/// True only if the file really begins with a RIFF/WAVE header.
+fn is_riff_wav(path: &str) -> bool {
+    use std::io::Read;
+    let mut hdr = [0u8; 12];
+    match std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut hdr)) {
+        Ok(()) => &hdr[0..4] == b"RIFF" && &hdr[8..12] == b"WAVE",
+        Err(_) => false,
+    }
+}
+
 pub fn ensure_wav(path: &str) -> Result<String, AudioError> {
     let p = Path::new(path);
-    let ext = p
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
 
-    if ext == "wav" {
+    // Trust the CONTENT, not the extension: a genuine RIFF/WAVE file is passed
+    // through as-is; anything else (mp3/flac/m4a/ogg/aac, incl. files mislabeled
+    // with a .wav name) is decoded to a real temp WAV first.
+    if is_riff_wav(path) {
         return Ok(path.to_string());
     }
 

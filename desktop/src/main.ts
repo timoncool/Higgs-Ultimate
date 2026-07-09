@@ -1803,6 +1803,8 @@ function initRefPlayer(kind: RefPreviewKind): void {
     waveformPath: "",
     waveformLoading: false,
     raf: null,
+    previewObjectUrl: "",
+    previewToken: 0,
   };
   player.audio.preload = "metadata";
   player.play.addEventListener("click", async () => {
@@ -1847,9 +1849,31 @@ function showRefPreview(kind: RefPreviewKind, path: string): void {
   preview.classList.remove("hidden");
   player.audio.pause();
   stopRefLoop(kind);
-  player.audio.src = convertFileSrc(path);
-  player.audio.load();
   player.seek.value = "0";
+  // Play through the Rust decoder (symphonia handles mp3/flac/m4a/ogg/aac and
+  // mislabeled files) so preview works for ANY format the user loaded — the
+  // browser <audio> alone fails on a non-WAV container behind a .wav name.
+  if (player.previewObjectUrl) {
+    URL.revokeObjectURL(player.previewObjectUrl);
+    player.previewObjectUrl = "";
+  }
+  const token = ++player.previewToken;
+  void (async () => {
+    try {
+      const res = await invoke<GenerationResult>("read_audio_as_wav", { audioPath: path });
+      if (token !== player.previewToken) return;
+      const blob = await base64ToBlobAsync(res.wavBase64, "audio/wav");
+      if (token !== player.previewToken) return;
+      player.previewObjectUrl = URL.createObjectURL(blob);
+      player.audio.src = player.previewObjectUrl;
+      player.audio.load();
+    } catch {
+      // Fallback: raw file via asset protocol (works for real WAV at least).
+      if (token !== player.previewToken) return;
+      player.audio.src = convertFileSrc(path);
+      player.audio.load();
+    }
+  })();
   void loadRefWaveform(kind, path);
   updateRefPlayback(kind);
 }

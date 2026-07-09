@@ -1,6 +1,6 @@
 import type { TtsModelPreset, WhisperModelPreset } from "./types";
 
-export const APP_VERSION = "0.3.0";
+export const APP_VERSION = "0.3.1";
 // Original author (engine + upstream app) — credit preserved in the UI footer.
 export const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 // This Russian portable fork.
