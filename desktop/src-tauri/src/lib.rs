@@ -3,6 +3,8 @@
 pub mod audio;
 mod download;
 mod engine;
+// pub: чтобы headless-пример env_check_smoke мог вызвать диагностику окружения.
+pub mod envdeps;
 pub mod parakeet;
 mod recorder;
 // pub: чтобы headless-пример voiceclean_test мог дергать clean_voice напрямую.
@@ -820,6 +822,36 @@ async fn download_engine_dll(
     .map_err(|e| format!("task join error: {e}"))?
     .map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+/// Диагностика окружения: драйвер NVIDIA + CUDA runtime DLL + VC++ runtime DLL.
+/// Возвращает { driver:{ok,version?}, cuda:{ok,missing[...]}, vcruntime:{ok,missing[...]} }.
+/// Не требует загруженного движка — используется мастером первого запуска и
+/// секцией «Системные библиотеки» в сайдбаре при ошибке загрузки.
+#[tauri::command]
+fn env_check(state: State<'_, AppState>) -> envdeps::EnvCheck {
+    envdeps::env_check(&state.engine_dir())
+}
+
+/// Скачать недостающие системные DLL класса `kind` (`cuda` | `vcruntime`) в
+/// resources/engine/. Прогресс — та же машина `download-progress`, что у моделей.
+/// После закачки повторно проверяет наличие и возвращает итог.
+#[tauri::command]
+async fn download_env_deps(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    kind: String,
+) -> Result<envdeps::DownloadEnvResult, String> {
+    let dep_kind = envdeps::DepKind::parse(&kind)
+        .ok_or_else(|| format!("неизвестный класс зависимостей: {kind} (ожидается cuda|vcruntime)"))?;
+    let engine_dir = state.engine_dir();
+    let tmp_dir = std::env::temp_dir();
+    let control = state.download_control.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        envdeps::download_env_deps(dep_kind, &engine_dir, &tmp_dir, &app, control)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
 }
 
 #[tauri::command]
@@ -4307,6 +4339,8 @@ pub fn run() {
             bundled_engine_path,
             diagnose_engine_load,
             download_engine_dll,
+            env_check,
+            download_env_deps,
             load_engine,
             unload_engine,
             load_model,
