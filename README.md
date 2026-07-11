@@ -24,7 +24,7 @@
 - **Синтез речи (TTS)** — нативный движок Higgs Audio v3, кванты от Q4 (8 ГБ VRAM) до BF16 (16 ГБ)
 - **Клонирование голоса** — по референс-аудио 30 сек, с авто-транскриптом через **Parakeet**
 - **Запись голоса с микрофона** — записать свой голос как референс (выбор устройства + индикатор уровня), Parakeet сразу его расшифрует. Во всех местах с выбором голоса
-- **Распознавание речи Parakeet** — NVIDIA parakeet-tdt-0.6b-v3, мультиязычный (вкл. русский), сам определяет язык; на CPU, быстрый, выбор кванта в UI
+- **Распознавание речи Parakeet** — NVIDIA parakeet-tdt-0.6b-v3 (ONNX Runtime), мультиязычный (вкл. русский), сам определяет язык; на CPU, быстрый, выбор варианта (INT8/FP32) в UI
 - **Продолжение речи** — модель договаривает начатую фразу в том же голосе
 - **Мультиспикер** — многоголосые диалоги; сегменты приводятся к единой громкости (LUFS/EBU R128)
 - **Галерея голосов** — сохранение голосов-персон, импорт/экспорт, фото и заметки
@@ -60,7 +60,7 @@
 
 3. **В приложении:** нажать «Скачать DLL движка», затем «Скачать» модель TTS (или «Обзор» — указать уже скачанную папку модели).
 
-4. **Модель распознавания (Parakeet):** в панели Parakeet выбрать квант (`q4_k`…`q8_0`…`f16`) и нажать «Скачать» — тянется из [`mudler/parakeet-cpp-gguf`](https://huggingface.co/mudler/parakeet-cpp-gguf). Нужна для авто-транскрипта при клонировании и записи голоса.
+4. **Модель распознавания (Parakeet):** в панели Parakeet выбрать вариант (**INT8** ~670 МБ по умолчанию или **FP32** ~2.5 ГБ) и нажать «Скачать» — набор ONNX-файлов тянется из [`istupakov/parakeet-tdt-0.6b-v3-onnx`](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx). Нужна для авто-транскрипта при клонировании и записи голоса. ONNX Runtime (`onnxruntime.dll`) подтягивается автоматически при первом распознавании.
 
 > Всё качается и хранится **внутри папки приложения**. Модели и голоса никуда больше не попадают.
 
@@ -95,7 +95,7 @@ npm run build          # tauri build → .exe
 
 - **[Saganaki22](https://github.com/Saganaki22/Higgs-Audio-v3-Studio)** — оригинальное приложение Higgs Audio v3 Studio и нативный C++/CUDA-движок. Этот проект — форк с русской локализацией и полной портативностью. Огромное спасибо за движок и десктоп-оболочку.
 - **[Boson AI](https://huggingface.co/bosonai)** — модель Higgs Audio v3.
-- **[parakeet.cpp](https://github.com/mudler/parakeet.cpp)** (mudler / LocalAI) и **[NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)** — движок и модель распознавания речи.
+- **[parakeet-rs](https://github.com/altunenes/parakeet-rs)** (altunenes) и **[NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)** — крейт распознавания речи (ONNX Runtime) и модель. ONNX-веса из [istupakov/parakeet-tdt-0.6b-v3-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx).
 
 ## Поддержать автора
 

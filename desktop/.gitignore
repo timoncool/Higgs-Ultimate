@@ -2,7 +2,8 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/
-src-tauri/models/whisper/
+src-tauri/models/
+src-tauri/onnxruntime.dll
 vite-dev.log
 
 src-tauri/resources/engine/*

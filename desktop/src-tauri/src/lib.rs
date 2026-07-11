@@ -1,7 +1,9 @@
 mod audio;
 mod download;
 mod engine;
-mod parakeet;
+// Public so a headless example (`cargo run --example asr_smoke`) can exercise
+// the real transcription path; nothing else depends on it being public.
+pub mod parakeet;
 mod recorder;
 
 use engine::{
@@ -1245,9 +1247,58 @@ async fn generate_finish_sentence(
 //
 // ASR is decoupled from the C++ TTS engine and runs in-process via the
 // `parakeet-rs` crate (ONNX Runtime, CPU). The model lives in a folder of ONNX
-// files next to the exe (models/parakeet/<variant>); ONNX Runtime is statically
-// linked, so no extra DLL ships. The v3 model auto-detects language — no toggle.
+// files next to the exe (models/parakeet/<variant>). ONNX Runtime is loaded
+// dynamically from `onnxruntime.dll` next to the exe (fetched on first use, like
+// the engine DLLs). The v3 model auto-detects language — no RU/EN toggle.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Official ONNX Runtime 1.24.2 (matches the pyke `ort` rc.12 build, API 24),
+// shipped as a NuGet package whose `runtimes/win-x64/native/onnxruntime.dll` we
+// extract next to the exe. `.nupkg` is a plain zip, opened with the `zip` crate.
+const ONNXRUNTIME_NUPKG_URL: &str =
+    "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.24.2/microsoft.ml.onnxruntime.1.24.2.nupkg";
+const ONNXRUNTIME_DLL_ENTRY: &str = "runtimes/win-x64/native/onnxruntime.dll";
+
+fn onnxruntime_dll_path() -> PathBuf {
+    app_root_dir().join("onnxruntime.dll")
+}
+
+/// Ensure `onnxruntime.dll` sits next to the exe (portable) and `ORT_DYLIB_PATH`
+/// points at it. Downloads + extracts it from the ONNX Runtime NuGet package on
+/// first use. Idempotent and cheap once the DLL exists.
+fn ensure_onnx_runtime() -> Result<(), String> {
+    let dll = onnxruntime_dll_path();
+    if dll.exists() {
+        std::env::set_var("ORT_DYLIB_PATH", &dll);
+        return Ok(());
+    }
+
+    let resp = ureq::get(ONNXRUNTIME_NUPKG_URL)
+        .call()
+        .map_err(|e| format!("download onnxruntime runtime: {e}"))?;
+    let mut buf = Vec::new();
+    std::io::Read::read_to_end(&mut resp.into_body().into_reader(), &mut buf)
+        .map_err(|e| format!("read onnxruntime package: {e}"))?;
+
+    let reader = std::io::Cursor::new(buf);
+    let mut archive =
+        zip::ZipArchive::new(reader).map_err(|e| format!("onnxruntime package is not a zip: {e}"))?;
+    let mut entry = archive
+        .by_name(ONNXRUNTIME_DLL_ENTRY)
+        .map_err(|e| format!("{ONNXRUNTIME_DLL_ENTRY} missing in package: {e}"))?;
+
+    let tmp = dll.with_extension("dll.tmp");
+    {
+        let mut out = std::fs::File::create(&tmp)
+            .map_err(|e| format!("create {}: {e}", tmp.display()))?;
+        std::io::copy(&mut entry, &mut out)
+            .map_err(|e| format!("write onnxruntime.dll: {e}"))?;
+    }
+    std::fs::rename(&tmp, &dll).map_err(|e| format!("finalize onnxruntime.dll: {e}"))?;
+
+    std::env::set_var("ORT_DYLIB_PATH", &dll);
+    Ok(())
+}
 
 /// Resolve the ASR model directory from the path the frontend stored. This is a
 /// folder holding the ONNX files (encoder/decoder + vocab.txt). For robustness
@@ -1287,6 +1338,7 @@ async fn transcribe_audio(
     let wav_path = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
 
     let text = tauri::async_runtime::spawn_blocking(move || {
+        ensure_onnx_runtime()?;
         parakeet::transcribe(&model_dir, &wav_path)
     })
     .await
@@ -3834,7 +3886,27 @@ fn cancel_active_generation(app: &AppHandle) {
 // Entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Point `ort` (ONNX Runtime, used by Parakeet ASR via `load-dynamic`) at the
+/// `onnxruntime.dll` that ships next to the exe. Portable-first: no reliance on
+/// a system-wide install or PATH. If the user hasn't overridden `ORT_DYLIB_PATH`
+/// and a bundled DLL exists, use it; otherwise leave ort's default search.
+fn configure_onnx_dylib() {
+    if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+        return;
+    }
+    let root = app_root_dir();
+    let candidates = [
+        root.join("onnxruntime.dll"),
+        root.join("resources").join("onnxruntime.dll"),
+    ];
+    if let Some(dll) = candidates.into_iter().find(|p| p.exists()) {
+        std::env::set_var("ORT_DYLIB_PATH", dll);
+    }
+}
+
 pub fn run() {
+    configure_onnx_dylib();
+
     // Portable: keep WebView2 state (localStorage settings) inside the app folder.
     // WebView2 honours this env var when the host does not set an explicit folder.
     if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
