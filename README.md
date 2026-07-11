@@ -45,15 +45,20 @@
 - **WebView2** — предустановлен в Windows 11 (в Windows 10 ставится автоматически)
 - **Место:** ~6 ГБ на модель (Q8_0)
 
-## Что нужно установить (важно!)
+## Что нужно установить
 
-Движок работает на **CUDA**, поэтому **перед первым запуском** поставьте в систему три вещи — без них движок не загрузится:
+**Вручную ставится только одно — свежий драйвер NVIDIA:**
 
-1. **Свежий драйвер NVIDIA** — [nvidia.com/Download](https://www.nvidia.com/Download/index.aspx)
-2. **CUDA Toolkit 13.x** — [developer.nvidia.com/cuda-downloads](https://developer.nvidia.com/cuda-downloads). Даёт системные библиотеки CUDA (`cudart`, `cuBLAS`, `cuSPARSE` и др.), без которых `audiocpp_engine.dll` падает с ошибкой о недостающих DLL.
-3. **Visual C++ Redistributable x64** — [aka.ms/vs/17/release/vc_redist.x64.exe](https://aka.ms/vs/17/release/vc_redist.x64.exe)
+- **Драйвер NVIDIA** — [nvidia.com/Download](https://www.nvidia.com/Download/index.aspx). Драйвер — единственное, что нельзя доставить DLL-кой: он ставится в систему и включает `nvcuda.dll`/`nvml.dll`. Приложение определяет его наличие и версию само.
 
-> Если при загрузке движка приложение пишет «missing required runtime DLL» — не хватает именно этих компонентов. Кнопка «Скачать DLL движка» тянет только сам движок; системные CUDA и драйвер должны стоять заранее.
+**Всё остальное приложение скачает и предложит установить кнопками** — ставить CUDA Toolkit и Visual C++ Redistributable вручную больше не нужно:
+
+- **CUDA runtime** (`cudart64_13` / `cublas64_13` / `cublasLt64_13`) — тянется из официальных редистрибутивных [PyPI-wheel'ов NVIDIA](https://pypi.org/project/nvidia-cublas/) (редистрибуция разрешена [CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/index.html), Attachment A).
+- **VC++ runtime** (`MSVCP140` / `VCRUNTIME140` / `VCRUNTIME140_1` / `VCOMP140`) — портативные DLL из HF-репозитория движка.
+
+При **первом запуске** мастер настройки показывает блок «Системные библиотеки» с тремя строками (CUDA runtime, VC++ runtime, драйвер NVIDIA) и статусами ✓/!. Не хватает CUDA или VC++ — жмёте «Скачать», приложение само докачивает недостающие DLL в `resources/engine/` и перепроверяет. Драйвер отсутствует — кнопка открывает страницу загрузки NVIDIA.
+
+> Если при загрузке движка появляется ошибка «не хватает системных DLL» — окно диагностики предлагает те же кнопки: «Скачать CUDA runtime», «Скачать VC++ runtime», «Открыть nvidia.com/drivers». Ничего искать вручную не нужно.
 
 ## Быстрый старт
 

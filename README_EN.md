@@ -655,11 +655,16 @@ a repair dialog listing missing DLLs such as `nvcuda.dll`,
 `cublas64_13.dll`, `cublasLt64_13.dll`, `vcruntime140.dll`,
 `vcruntime140_1.dll`, `msvcp140.dll`, or `VCOMP140.DLL`.
 
-Make sure:
+The diagnostics window offers one-click fixes — you no longer install CUDA
+Toolkit or the VC++ Redistributable by hand:
 
-- NVIDIA driver is current.
-- Click `Download Engine DLLs`, or make sure CUDA Toolkit 13.x runtime DLLs required by the engine are on `PATH`.
-- Click `Download Engine DLLs`, or install Microsoft Visual C++ Redistributable 2015-2022 x64.
+- **NVIDIA driver** — the only thing you install manually. If it is missing,
+  click `Open nvidia.com/drivers`.
+- **CUDA runtime** — click `Download CUDA runtime`. The app fetches
+  `cudart64_13` / `cublas64_13` / `cublasLt64_13` from NVIDIA's redistributable
+  PyPI wheels into `resources/engine/`.
+- **VC++ runtime** — click `Download VC++ runtime`. The app fetches
+  `MSVCP140` / `VCRUNTIME140` / `VCRUNTIME140_1` / `VCOMP140`.
 - The engine DLL was built for your GPU architecture.
 
 ### VRAM spikes during generation
