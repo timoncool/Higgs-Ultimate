@@ -1,8 +1,8 @@
-mod audio;
+// Public so headless examples (`cargo run --example asr_smoke` / `diar_test`) can
+// exercise the real decode + transcription paths; nothing else needs it public.
+pub mod audio;
 mod download;
 mod engine;
-// Public so a headless example (`cargo run --example asr_smoke`) can exercise
-// the real transcription path; nothing else depends on it being public.
 pub mod parakeet;
 mod recorder;
 
@@ -1363,6 +1363,144 @@ async fn transcribe_audio(
 #[tauri::command]
 fn unload_asr() {
     parakeet::unload();
+}
+
+// ─── Диаризация (Sortformer v2) — вкладка «Транскрипт и диаризация» ───────────
+
+/// Sortformer v2 ONNX для диаризации. Скачивается один раз в models/sortformer
+/// (пресетом системы моделей). Источник — altunenes/parakeet-rs (см. доки крейта).
+const SORTFORMER_MODEL_URL: &str =
+    "https://huggingface.co/altunenes/parakeet-rs/resolve/main/diar_streaming_sortformer_4spk-v2.onnx";
+const SORTFORMER_MODEL_FILE: &str = "diar_streaming_sortformer_4spk-v2.onnx";
+
+fn sortformer_model_path() -> PathBuf {
+    user_models_root()
+        .join("sortformer")
+        .join(SORTFORMER_MODEL_FILE)
+}
+
+/// Есть ли скачанная Sortformer-модель (для UI: показать кнопку скачивания).
+#[tauri::command]
+fn sortformer_status() -> serde_json::Value {
+    let path = sortformer_model_path();
+    serde_json::json!({
+        "installed": path.exists(),
+        "path": path.to_string_lossy(),
+    })
+}
+
+/// Скачать Sortformer v2 в models/sortformer (та же машина прогресса, что модели).
+#[tauri::command]
+async fn download_sortformer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let dest_dir = user_models_root().join("sortformer");
+    let control = state.download_control.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        download::download_file(
+            SORTFORMER_MODEL_URL,
+            &dest_dir,
+            Some(SORTFORMER_MODEL_FILE),
+            &app,
+            control,
+        )
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "path": result.path, "size": result.size }))
+}
+
+/// Полный пайплайн вкладки: декод -> (диаризация Sortformer, если модель есть и
+/// `diarize=true`) -> транскрипция по репликам, иначе посегментная транскрипция
+/// всего клипа. Прогресс-стадии эмитятся как события `transcript-progress`.
+#[tauri::command]
+async fn diarize_transcribe(
+    app: AppHandle,
+    audio_path: String,
+    whisper_model_path: Option<String>,
+    diarize: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let model_path = whisper_model_path
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| "Не выбрана ASR-модель. Скачайте Parakeet в настройках.".to_string())?;
+    let model_dir = resolve_asr_model_dir(&model_path)?;
+    let want_diarize = diarize.unwrap_or(true);
+
+    let emit = |phase: &str| {
+        let _ = app.emit("transcript-progress", serde_json::json!({ "phase": phase }));
+    };
+
+    emit("decode");
+    let wav_path = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
+
+    let sortformer = sortformer_model_path();
+    let have_sortformer = want_diarize && sortformer.exists();
+
+    let phase_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ensure_onnx_runtime()?;
+        let sf: Option<&std::path::Path> = if have_sortformer {
+            let _ = phase_app.emit(
+                "transcript-progress",
+                serde_json::json!({ "phase": "diarize" }),
+            );
+            Some(sortformer.as_path())
+        } else {
+            None
+        };
+        let _ = phase_app.emit(
+            "transcript-progress",
+            serde_json::json!({ "phase": "transcribe" }),
+        );
+        parakeet::transcribe_and_diarize(&model_dir, sf, &wav_path)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))??;
+
+    emit("done");
+    Ok(serde_json::json!({
+        "segments": result.segments,
+        "nSpeakers": result.n_speakers,
+        "diarized": have_sortformer,
+    }))
+}
+
+/// «Сделать голос»: собрать реф-клип спикера из отобранных сегментов транскрипта
+/// и записать его временным WAV. Возвращает путь к wav + объединённый ref_text —
+/// фронт заводит по ним персону тем же механизмом, что импорт войспака.
+#[tauri::command]
+async fn build_speaker_voice(
+    audio_path: String,
+    segments: Vec<parakeet::SpeakerSegment>,
+    speaker: i32,
+    speaker_name: String,
+) -> Result<serde_json::Value, String> {
+    let wav_path = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
+    let (wav_bytes, ref_text) = tauri::async_runtime::spawn_blocking(move || {
+        // до ~30с реф под Higgs-клон, паузы ~0.3с между кусками.
+        parakeet::build_speaker_reference(&wav_path, &segments, speaker, 30.0, 0.3)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))??;
+
+    // Записать во временный файл (фронт скопирует его в папку персоны).
+    let safe: String = speaker_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("higgs_voice_{safe}_{stamp}.wav"));
+    std::fs::write(&tmp, &wav_bytes).map_err(|e| format!("write voice wav: {e}"))?;
+
+    Ok(serde_json::json!({
+        "path": tmp.to_string_lossy(),
+        "refText": ref_text,
+    }))
 }
 
 /// Level-match a generated WAV clip to a target integrated loudness (LUFS).
@@ -4005,6 +4143,10 @@ pub fn run() {
             generate_voice_clone,
             generate_finish_sentence,
             transcribe_audio,
+            diarize_transcribe,
+            build_speaker_voice,
+            sortformer_status,
+            download_sortformer,
             unload_asr,
             normalize_wav,
             recorder::start_recording,
