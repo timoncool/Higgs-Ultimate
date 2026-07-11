@@ -149,6 +149,7 @@
             <button class="mode-tab" data-mode="api" role="tab" aria-selected="false">API</button>
             <button class="mode-tab" data-mode="speakers" role="tab" aria-selected="false">Speaker Gallery</button>
             <button class="mode-tab" data-mode="batch" role="tab" aria-selected="false">Batch</button>
+            <button class="mode-tab" data-mode="transcript" role="tab" aria-selected="false">Transcript &amp; Diarization</button>
             <button class="mode-tab" data-mode="history" role="tab" aria-selected="false">History</button>
           </div>
 
@@ -670,6 +671,50 @@ Third phrase."></textarea>
             </div>
             <div id="batch-log" class="batch-log"></div>
             <div id="batch-results" class="batch-results"></div>
+          </div>
+
+          <!-- ═══ Transcript & Diarization ═══ -->
+          <div class="mode-content hidden" id="mode-transcript">
+            <div class="history-head">
+              <h3>Transcript &amp; Diarization</h3>
+            </div>
+            <p class="input-hint">Drop an audio or video file, or record from the microphone. Speech is transcribed with word timing; multiple voices are split into speakers.</p>
+
+            <div id="transcript-dropzone" class="transcript-dropzone dropzone">
+              <div class="transcript-dropzone-inner">
+                <span class="transcript-dropzone-icon">🎧</span>
+                <strong>Drop audio or video here</strong>
+                <span class="input-hint">wav · mp3 · flac · m4a · ogg · mp4 (video audio track)</span>
+                <div class="action-row record-row">
+                  <button id="transcript-pick-btn" class="compact-button" type="button">Choose file…</button>
+                  <button id="transcript-record-btn" class="compact-button" type="button">● Record</button>
+                  <span class="rec-meter"><span class="rec-meter-fill"></span></span>
+                </div>
+              </div>
+            </div>
+
+            <div id="transcript-source" class="transcript-source hidden">
+              <span id="transcript-source-name" class="transcript-source-name"></span>
+              <button id="transcript-source-clear" class="compact-button" type="button">Clear</button>
+            </div>
+
+            <div class="transcript-options">
+              <label class="inline-toggle">
+                <span>Detect speakers (diarization)</span>
+                <span class="toggle-switch"><input type="checkbox" id="transcript-diarize" checked /><span class="toggle-slider"></span></span>
+              </label>
+              <span id="transcript-sortformer-note" class="input-hint"></span>
+              <button id="transcript-download-diar" class="compact-button hidden" type="button">⬇ Download diarization model (~470 MB)</button>
+            </div>
+
+            <div class="action-row">
+              <button id="transcript-run-btn" class="primary-btn" type="button">▶ Transcribe</button>
+              <button id="transcript-export-txt" class="compact-button hidden" type="button">Export .txt</button>
+              <button id="transcript-export-srt" class="compact-button hidden" type="button">Export .srt</button>
+            </div>
+
+            <div id="transcript-status" class="transcript-status"></div>
+            <div id="transcript-result" class="transcript-result"></div>
           </div>
 
           <!-- ═══ Generate / Cancel ═══ -->

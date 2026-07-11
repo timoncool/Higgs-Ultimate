@@ -1,4 +1,18 @@
-export type Mode = "tts" | "clone" | "speakers" | "finish" | "multi" | "api" | "history" | "batch";
+export type Mode = "tts" | "clone" | "speakers" | "finish" | "multi" | "api" | "history" | "batch" | "transcript";
+
+// Один сегмент результата диаризации/транскрипции (camelCase из Rust).
+export type TranscriptSegment = {
+  start: number;
+  end: number;
+  text: string;
+  speaker: number;
+};
+
+export type TranscriptResult = {
+  segments: TranscriptSegment[];
+  nSpeakers: number;
+  diarized: boolean;
+};
 export type SaveFormat = "wav" | "mp3";
 export type DownloadKind = "model" | "whisper" | "engine";
 

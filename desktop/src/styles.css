@@ -2168,3 +2168,47 @@ input[type="range"]::-moz-range-thumb {
 .rec-meter { display: none; flex: 1 1 60px; min-width: 60px; max-width: 200px; height: 8px; border-radius: 4px; background: var(--border, #2a2a30); overflow: hidden; vertical-align: middle; }
 .rec-meter.active { display: inline-block; }
 .rec-meter-fill { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), #e74c3c); transition: width 60ms linear; }
+
+/* ── Transcript & Diarization tab ── */
+.transcript-dropzone { flex-direction: column; }
+.transcript-dropzone-inner { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.transcript-dropzone-icon { font-size: 30px; }
+.transcript-source {
+  display: flex; align-items: center; gap: 10px; margin: 12px 0;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--surface-2, #17171c); border: 1px solid var(--border, #242a31);
+}
+.transcript-source-name { font-weight: 600; font-size: 14px; word-break: break-all; }
+.transcript-options { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.transcript-status { min-height: 20px; margin: 10px 0; color: var(--text-secondary); font-size: 14px; }
+.transcript-result { display: flex; flex-direction: column; gap: 14px; }
+
+.transcript-speakers { display: flex; flex-wrap: wrap; gap: 10px; }
+.transcript-speaker-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 10px; border-radius: 999px;
+  background: var(--surface-2, #17171c);
+  border: 1px solid var(--spk-color, var(--accent));
+  border-left: 4px solid var(--spk-color, var(--accent));
+}
+.transcript-speaker-name {
+  background: transparent; border: none; color: var(--text-primary);
+  font-weight: 600; font-size: 14px; width: 130px; padding: 2px 4px;
+}
+.transcript-speaker-name:focus { outline: 1px solid var(--accent); border-radius: 4px; }
+
+.transcript-segments { display: flex; flex-direction: column; gap: 8px; }
+.transcript-segment {
+  border-left: 4px solid var(--spk-color, var(--accent));
+  background: var(--surface-2, #17171c); border-radius: 8px;
+  padding: 8px 12px;
+}
+.transcript-segment-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.transcript-speaker-tag { color: var(--spk-color, var(--accent)); font-weight: 700; font-size: 12px; }
+.transcript-segment-time {
+  background: transparent; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums;
+  padding: 0;
+}
+.transcript-segment-time:hover { color: var(--accent); }
+.transcript-segment-text { font-size: 14px; line-height: 1.45; color: var(--text-primary); }

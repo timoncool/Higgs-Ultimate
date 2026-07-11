@@ -434,6 +434,52 @@ export const RU: Record<string, string> = {
   "Failed": "Ошибка",
   "Done": "Готово",
   "saved": "сохр.",
+
+  // ── Transcript & Diarization tab ──
+  "Transcript & Diarization": "Транскрипт и диаризация",
+  "Drop an audio or video file, or record from the microphone. Speech is transcribed with word timing; multiple voices are split into speakers.":
+    "Перетащите аудио или видео, либо запишите с микрофона. Речь транскрибируется с таймингом по словам; несколько голосов разбиваются по спикерам.",
+  "Drop audio or video here": "Перетащите аудио или видео сюда",
+  "wav · mp3 · flac · m4a · ogg · mp4 (video audio track)":
+    "wav · mp3 · flac · m4a · ogg · mp4 (аудиодорожка видео)",
+  "Choose file…": "Выбрать файл…",
+  "● Record": "● Запись",
+  "Detect speakers (diarization)": "Определять спикеров (диаризация)",
+  "⬇ Download diarization model (~470 MB)": "⬇ Скачать модель диаризации (~470 МБ)",
+  "▶ Transcribe": "▶ Транскрибировать",
+  "Export .txt": "Экспорт .txt",
+  "Export .srt": "Экспорт .srt",
+  "Diarization model ready.": "Модель диаризации готова.",
+  "Diarization model not downloaded — single-speaker transcription only.":
+    "Модель диаризации не скачана — только односпикерная транскрипция.",
+  "Downloading diarization model…": "Скачивание модели диаризации…",
+  "Diarization model downloaded.": "Модель диаризации скачана.",
+  "Model download failed": "Не удалось скачать модель",
+  "No ASR model set. Download the Parakeet model in Settings.":
+    "Не выбрана ASR-модель. Скачайте Parakeet в настройках.",
+  "Choose an audio or video file first.": "Сначала выберите аудио или видео.",
+  "Decoding…": "Декодирование…",
+  "Diarizing…": "Диаризация…",
+  "Transcribing…": "Транскрипция…",
+  "Transcription failed": "Ошибка транскрипции",
+  "No speech found.": "Речь не найдена.",
+  "Speaker": "Спикер",
+  "speakers": "спикеров",
+  "1 speaker": "1 спикер",
+  "Play segment": "Воспроизвести сегмент",
+  "Rename speaker": "Переименовать спикера",
+  "Make voice": "Сделать голос",
+  "Building voice…": "Собираем голос…",
+  "Voice added to gallery": "Голос добавлен в галерею",
+  "A speaker with this name already exists": "Голос с таким именем уже существует",
+  "Could not build voice": "Не удалось собрать голос",
+  "Nothing to export yet.": "Пока нечего экспортировать.",
+  "Exported": "Экспортировано",
+  "Export failed": "Ошибка экспорта",
+  "Recording…": "Запись…",
+  "video": "видео",
+  "Video has no decodable audio track, or the container is unsupported (try mp4).":
+    "В видео нет декодируемой аудиодорожки, либо контейнер не поддерживается (попробуйте mp4).",
 };
 
 // Translate a dynamic string. Returns Russian when in RU mode and known,

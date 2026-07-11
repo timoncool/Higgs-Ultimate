@@ -81,6 +81,8 @@ import type {
   SaveFormat,
   SpeakerPersona,
   StudioJobEvent,
+  TranscriptResult,
+  TranscriptSegment,
   TtsModelPreset,
   WhisperModelPreset,
   WavPcm,
@@ -1240,8 +1242,9 @@ function switchMode(mode: Mode): void {
     content.classList.toggle("hidden", content.id !== `mode-${mode}`);
   }
   // Hide generation UI in utility views.
-  const isUtility = mode === "history" || mode === "api" || mode === "speakers" || mode === "batch";
+  const isUtility = mode === "history" || mode === "api" || mode === "speakers" || mode === "batch" || mode === "transcript";
   if (mode === "batch") refreshBatchPersonaOptions();
+  if (mode === "transcript") void refreshTranscriptModelNote();
   el<HTMLElement>("#advanced-details").classList.toggle("hidden", isUtility);
   el<HTMLElement>("#action-row").classList.toggle("hidden", isUtility);
   el<HTMLElement>("#progress-section").classList.toggle("hidden", isUtility || !isGenerating || activeGenerationJob?.mode !== mode);
@@ -4499,6 +4502,447 @@ function initBatchTab(): void {
   el("#batch-stop-btn").addEventListener("click", () => void stopBatch());
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Transcript & Diarization tab
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Source file selected for transcription (audio path OR video path — the Rust
+// decode path (ensure_wav → symphonia) extracts the audio track). We keep the
+// ORIGINAL path so the backend re-decodes it for both transcription and voice
+// building; a temp .wav name is only shown for recordings.
+let transcriptSourcePath = "";
+let transcriptSourceLabel = "";
+// Names shown per speaker (index = contiguous speaker id 0..k-1), editable in UI.
+let transcriptSpeakerNames: string[] = [];
+let transcriptResult: TranscriptResult | null = null;
+let transcriptRunning = false;
+// Cached decoded WAV for in-tab segment playback (one <audio> reused).
+const transcriptPlayer = new Audio();
+let transcriptPlayerUrl = "";
+let transcriptPlayStopTimer: number | null = null;
+let transcriptProgressUnlisten: (() => void) | null = null;
+
+const TRANSCRIPT_VIDEO_EXTS = ["mp4", "mkv", "webm", "mov", "m4v", "avi"];
+const TRANSCRIPT_AUDIO_EXTS = ["wav", "mp3", "flac", "m4a", "ogg", "aac", "opus"];
+
+function isTranscriptVideoPath(path: string): boolean {
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  return TRANSCRIPT_VIDEO_EXTS.includes(ext);
+}
+
+// Speaker chip colors — distinct hues, reused cyclically past 6 speakers.
+const SPEAKER_COLORS = ["#25b8ab", "#e0803a", "#7a6ff0", "#d8556f", "#48a860", "#c9a227"];
+function speakerColor(id: number): string {
+  return SPEAKER_COLORS[((id % SPEAKER_COLORS.length) + SPEAKER_COLORS.length) % SPEAKER_COLORS.length];
+}
+function transcriptSpeakerName(id: number): string {
+  return transcriptSpeakerNames[id] || `${t("Speaker")} ${id + 1}`;
+}
+
+async function refreshTranscriptModelNote(): Promise<void> {
+  const note = document.querySelector<HTMLElement>("#transcript-sortformer-note");
+  const dlBtn = document.querySelector<HTMLButtonElement>("#transcript-download-diar");
+  const diarizeToggle = document.querySelector<HTMLInputElement>("#transcript-diarize");
+  try {
+    const status = await invoke<{ installed: boolean; path: string }>("sortformer_status");
+    if (note) {
+      note.textContent = status.installed
+        ? t("Diarization model ready.")
+        : t("Diarization model not downloaded — single-speaker transcription only.");
+    }
+    if (dlBtn) dlBtn.classList.toggle("hidden", status.installed);
+    if (diarizeToggle && !status.installed) diarizeToggle.checked = false;
+  } catch (e) {
+    if (note) note.textContent = String(e);
+  }
+}
+
+async function downloadDiarizationModel(): Promise<void> {
+  const btn = el<HTMLButtonElement>("#transcript-download-diar");
+  btn.disabled = true;
+  showToast(t("Downloading diarization model…"));
+  try {
+    await invoke("download_sortformer");
+    showToast(t("Diarization model downloaded."));
+    const toggle = document.querySelector<HTMLInputElement>("#transcript-diarize");
+    if (toggle) toggle.checked = true;
+    await refreshTranscriptModelNote();
+  } catch (e) {
+    showToast(`${t("Model download failed")}: ${e}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function setTranscriptSource(path: string, label: string): void {
+  transcriptSourcePath = path;
+  transcriptSourceLabel = label;
+  const wrap = el<HTMLElement>("#transcript-source");
+  wrap.classList.toggle("hidden", !path);
+  el<HTMLElement>("#transcript-source-name").textContent = label;
+}
+
+function clearTranscriptSource(): void {
+  setTranscriptSource("", "");
+  el<HTMLButtonElement>("#transcript-run-btn").disabled = false;
+}
+
+async function pickTranscriptFile(): Promise<void> {
+  const selected = await open({
+    filters: [
+      { name: "Media", extensions: [...TRANSCRIPT_AUDIO_EXTS, ...TRANSCRIPT_VIDEO_EXTS] },
+      { name: "Audio", extensions: TRANSCRIPT_AUDIO_EXTS },
+      { name: "Video", extensions: TRANSCRIPT_VIDEO_EXTS },
+    ],
+  });
+  if (!selected) return;
+  const path = Array.isArray(selected) ? selected[0] : selected;
+  const name = path.split(/[/\\]/).pop() || path;
+  setTranscriptSource(path, name);
+}
+
+function setTranscriptStatus(text: string): void {
+  el<HTMLElement>("#transcript-status").textContent = text;
+}
+
+// Live progress phases emitted by the `diarize_transcribe` command.
+function transcriptPhaseLabel(phase: string): string {
+  switch (phase) {
+    case "decode": return t("Decoding…");
+    case "diarize": return t("Diarizing…");
+    case "transcribe": return t("Transcribing…");
+    default: return "";
+  }
+}
+
+async function runTranscription(): Promise<void> {
+  if (transcriptRunning) return;
+  if (!transcriptSourcePath) {
+    showToast(t("Choose an audio or video file first."), "warning");
+    return;
+  }
+  const whisperModelPath = localStorage.getItem("higgsAudio.whisperModel") || "";
+  if (!whisperModelPath) {
+    showToast(t("No ASR model set. Download the Parakeet model in Settings."), "warning");
+    return;
+  }
+
+  transcriptRunning = true;
+  const runBtn = el<HTMLButtonElement>("#transcript-run-btn");
+  runBtn.disabled = true;
+  el<HTMLButtonElement>("#transcript-export-txt").classList.add("hidden");
+  el<HTMLButtonElement>("#transcript-export-srt").classList.add("hidden");
+  el<HTMLElement>("#transcript-result").innerHTML = "";
+  transcriptResult = null;
+  transcriptSpeakerNames = [];
+  setTranscriptStatus(t("Decoding…"));
+
+  const diarize = el<HTMLInputElement>("#transcript-diarize").checked;
+  // Follow staged progress from the backend.
+  transcriptProgressUnlisten = await listen<{ phase: string }>("transcript-progress", (e) => {
+    const label = transcriptPhaseLabel(e.payload.phase);
+    if (label) setTranscriptStatus(label);
+  });
+
+  try {
+    const result = await invoke<TranscriptResult>("diarize_transcribe", {
+      audioPath: transcriptSourcePath,
+      whisperModelPath,
+      diarize,
+    });
+    transcriptResult = result;
+    transcriptSpeakerNames = Array.from(
+      { length: Math.max(1, result.nSpeakers) },
+      (_, i) => `${t("Speaker")} ${i + 1}`,
+    );
+    renderTranscript();
+    if (result.segments.length === 0) {
+      setTranscriptStatus(t("No speech found."));
+    } else {
+      const spk = result.nSpeakers <= 1
+        ? t("1 speaker")
+        : `${result.nSpeakers} ${t("speakers")}`;
+      setTranscriptStatus(`${spk} · ${result.segments.length}`);
+      el<HTMLButtonElement>("#transcript-export-txt").classList.remove("hidden");
+      el<HTMLButtonElement>("#transcript-export-srt").classList.remove("hidden");
+    }
+  } catch (e) {
+    const msg = String(e);
+    // Video with no decodable audio track surfaces as a symphonia probe/decode error.
+    if (isTranscriptVideoPath(transcriptSourcePath) && /probe|decode|no audio/i.test(msg)) {
+      setTranscriptStatus(t("Video has no decodable audio track, or the container is unsupported (try mp4)."));
+    } else {
+      setTranscriptStatus(`${t("Transcription failed")}: ${msg}`);
+    }
+    showToast(`${t("Transcription failed")}: ${msg}`, "error");
+  } finally {
+    transcriptProgressUnlisten?.();
+    transcriptProgressUnlisten = null;
+    transcriptRunning = false;
+    runBtn.disabled = false;
+  }
+}
+
+// Play just one segment [start,end] by decoding the source once into an <audio>.
+async function playTranscriptSegment(start: number, end: number): Promise<void> {
+  try {
+    if (!transcriptPlayerUrl) {
+      // Decode the source to a real WAV once, blob it for HTML5 playback.
+      const decoded = await invoke<{ wavBase64: string }>("read_audio_as_wav", {
+        audioPath: transcriptSourcePath,
+      });
+      const blob = await base64ToBlobAsync(decoded.wavBase64, "audio/wav");
+      transcriptPlayerUrl = URL.createObjectURL(blob);
+      transcriptPlayer.src = transcriptPlayerUrl;
+    }
+    if (transcriptPlayStopTimer !== null) {
+      window.clearTimeout(transcriptPlayStopTimer);
+      transcriptPlayStopTimer = null;
+    }
+    transcriptPlayer.currentTime = Math.max(0, start);
+    await transcriptPlayer.play();
+    const ms = Math.max(120, (end - start) * 1000);
+    transcriptPlayStopTimer = window.setTimeout(() => {
+      transcriptPlayer.pause();
+      transcriptPlayStopTimer = null;
+    }, ms);
+  } catch (e) {
+    showToast(`${t("Transcription failed")}: ${e}`, "error");
+  }
+}
+
+function formatTimecode(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+
+function renderTranscript(): void {
+  const root = el<HTMLElement>("#transcript-result");
+  root.innerHTML = "";
+  if (!transcriptResult || transcriptResult.segments.length === 0) return;
+
+  const diarized = transcriptResult.diarized && transcriptResult.nSpeakers > 1;
+  const nSpeakers = Math.max(1, transcriptResult.nSpeakers);
+
+  // Per-speaker header row (rename + make voice) — only when diarized.
+  if (diarized) {
+    const speakersBar = document.createElement("div");
+    speakersBar.className = "transcript-speakers";
+    for (let sid = 0; sid < nSpeakers; sid++) {
+      const chip = document.createElement("div");
+      chip.className = "transcript-speaker-head";
+      chip.style.setProperty("--spk-color", speakerColor(sid));
+
+      const nameInput = document.createElement("input");
+      nameInput.className = "transcript-speaker-name";
+      nameInput.type = "text";
+      nameInput.value = transcriptSpeakerName(sid);
+      nameInput.title = t("Rename speaker");
+      nameInput.addEventListener("change", () => {
+        transcriptSpeakerNames[sid] = nameInput.value.trim() || `${t("Speaker")} ${sid + 1}`;
+        // Re-render segment labels to reflect the new name.
+        renderTranscript();
+      });
+
+      const voiceBtn = document.createElement("button");
+      voiceBtn.className = "compact-button";
+      voiceBtn.type = "button";
+      voiceBtn.textContent = t("Make voice");
+      voiceBtn.addEventListener("click", () => void makeSpeakerVoice(sid, voiceBtn));
+
+      chip.append(nameInput, voiceBtn);
+      speakersBar.appendChild(chip);
+    }
+    root.appendChild(speakersBar);
+  }
+
+  // Segments in time order, colored by speaker.
+  const list = document.createElement("div");
+  list.className = "transcript-segments";
+  const ordered = [...transcriptResult.segments].sort((a, b) => a.start - b.start);
+  for (const seg of ordered) {
+    const item = document.createElement("div");
+    item.className = "transcript-segment";
+    item.style.setProperty("--spk-color", speakerColor(seg.speaker));
+
+    const meta = document.createElement("div");
+    meta.className = "transcript-segment-meta";
+    if (diarized) {
+      const tag = document.createElement("span");
+      tag.className = "transcript-speaker-tag";
+      tag.textContent = transcriptSpeakerName(seg.speaker);
+      meta.appendChild(tag);
+    }
+    const time = document.createElement("button");
+    time.className = "transcript-segment-time";
+    time.type = "button";
+    time.title = t("Play segment");
+    time.textContent = `▶ ${formatTimecode(seg.start)}`;
+    time.addEventListener("click", () => void playTranscriptSegment(seg.start, seg.end));
+    meta.appendChild(time);
+
+    const text = document.createElement("div");
+    text.className = "transcript-segment-text";
+    text.textContent = seg.text;
+
+    item.append(meta, text);
+    list.appendChild(item);
+  }
+  root.appendChild(list);
+}
+
+// «Сделать голос»: collect a speaker's best segments into a reference clip and
+// register it as a gallery persona — same mechanism as importStandardVoicePack.
+async function makeSpeakerVoice(speaker: number, btn: HTMLButtonElement): Promise<void> {
+  if (!transcriptResult) return;
+  const name = transcriptSpeakerName(speaker).trim();
+  if (speakerPersonas.some((p) => p.name.trim().toLowerCase() === name.toLowerCase())) {
+    showToast(t("A speaker with this name already exists"), "warning");
+    return;
+  }
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = t("Building voice…");
+  try {
+    const built = await invoke<{ path: string; refText: string }>("build_speaker_voice", {
+      audioPath: transcriptSourcePath,
+      segments: transcriptResult.segments as TranscriptSegment[],
+      speaker,
+      speakerName: name,
+    });
+    const persona = createBlankPersona();
+    persona.name = name;
+    const prepared = await prepareReferenceAudioFile(built.path, `${name}.wav`);
+    const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
+    persona.refPath = stored.path;
+    persona.refName = prepared.name || stored.fileName;
+    persona.refText = built.refText;
+    persona.cachePath = "";
+    persona.updatedAt = Date.now();
+    speakerPersonas.push(persona);
+    saveSpeakerPersonas();
+    renderSpeakerPersonaUi();
+    showToast(`${t("Voice added to gallery")}: ${name}`);
+  } catch (e) {
+    showToast(`${t("Could not build voice")}: ${e}`, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function transcriptToTxt(): string {
+  if (!transcriptResult) return "";
+  const diarized = transcriptResult.diarized && transcriptResult.nSpeakers > 1;
+  return [...transcriptResult.segments]
+    .sort((a, b) => a.start - b.start)
+    .map((s) => (diarized ? `[${transcriptSpeakerName(s.speaker)}] ${s.text}` : s.text))
+    .join("\n");
+}
+
+function srtTimecode(seconds: number): string {
+  const s = Math.max(0, seconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  const ms = Math.round((s - Math.floor(s)) * 1000);
+  const pad = (n: number, w = 2) => n.toString().padStart(w, "0");
+  return `${pad(h)}:${pad(m)}:${pad(sec)},${pad(ms, 3)}`;
+}
+
+function transcriptToSrt(): string {
+  if (!transcriptResult) return "";
+  const diarized = transcriptResult.diarized && transcriptResult.nSpeakers > 1;
+  const ordered = [...transcriptResult.segments].sort((a, b) => a.start - b.start);
+  return ordered
+    .map((s, i) => {
+      const body = diarized ? `${transcriptSpeakerName(s.speaker)}: ${s.text}` : s.text;
+      return `${i + 1}\n${srtTimecode(s.start)} --> ${srtTimecode(s.end)}\n${body}\n`;
+    })
+    .join("\n");
+}
+
+async function exportTranscript(kind: "txt" | "srt"): Promise<void> {
+  if (!transcriptResult || transcriptResult.segments.length === 0) {
+    showToast(t("Nothing to export yet."), "warning");
+    return;
+  }
+  const content = kind === "txt" ? transcriptToTxt() : transcriptToSrt();
+  const base = (transcriptSourceLabel.replace(/\.[^.]+$/, "") || "transcript");
+  try {
+    const path = await save({
+      defaultPath: `${base}.${kind}`,
+      filters: [{ name: kind.toUpperCase(), extensions: [kind] }],
+    });
+    if (!path) return;
+    await invoke("save_text_file", { path, content });
+    showToast(`${t("Exported")} .${kind}`);
+  } catch (e) {
+    showToast(`${t("Export failed")}: ${e}`, "error");
+  }
+}
+
+function initTranscriptTab(): void {
+  el("#transcript-pick-btn").addEventListener("click", () => void pickTranscriptFile());
+  el("#transcript-source-clear").addEventListener("click", () => clearTranscriptSource());
+  el("#transcript-download-diar").addEventListener("click", () => void downloadDiarizationModel());
+  el("#transcript-run-btn").addEventListener("click", () => void runTranscription());
+  el("#transcript-export-txt").addEventListener("click", () => void exportTranscript("txt"));
+  el("#transcript-export-srt").addEventListener("click", () => void exportTranscript("srt"));
+
+  // Record straight into the transcript source (same recorder as everywhere).
+  wireRecordButton("#transcript-record-btn", (path, _name) => {
+    // A fresh recording invalidates the cached playback blob.
+    resetTranscriptPlayback();
+    setTranscriptSource(path, t("Recording…"));
+  });
+
+  // OS-level drag-drop: the dropzone carries the `.dropzone` class so the global
+  // Tauri drop router finds it; register a handler that accepts audio AND video.
+  dropzoneHandlers.push({
+    selector: "#transcript-dropzone",
+    onFile: (path, name) => {
+      resetTranscriptPlayback();
+      setTranscriptSource(path, name);
+    },
+  });
+  // In-webview HTML5 drop fallback (browser dev / some platforms).
+  const dz = el<HTMLElement>("#transcript-dropzone");
+  dz.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dz.classList.add("drag-over");
+  });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dz.classList.remove("drag-over");
+    const file = e.dataTransfer?.files?.[0];
+    const path = file ? ((file as any).path as string | undefined) : undefined;
+    if (path) {
+      resetTranscriptPlayback();
+      setTranscriptSource(path, file!.name);
+    }
+  });
+}
+
+// Drop the decoded playback blob when the source changes.
+function resetTranscriptPlayback(): void {
+  if (transcriptPlayStopTimer !== null) {
+    window.clearTimeout(transcriptPlayStopTimer);
+    transcriptPlayStopTimer = null;
+  }
+  transcriptPlayer.pause();
+  if (transcriptPlayerUrl) {
+    URL.revokeObjectURL(transcriptPlayerUrl);
+    transcriptPlayerUrl = "";
+  }
+  transcriptPlayer.removeAttribute("src");
+}
+
 async function doCancel(): Promise<void> {
   if (!isGenerating || !activeGenerationJob) return;
   cancelRequested = true;
@@ -5799,6 +6243,7 @@ async function main(): Promise<void> {
   initGenerate();
   initAudioPlayer();
   initBatchTab();
+  initTranscriptTab();
   setupRecLevelListener();
   void populateMicSelects();
   initDownload();
