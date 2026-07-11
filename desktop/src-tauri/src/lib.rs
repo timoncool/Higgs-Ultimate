@@ -5,6 +5,8 @@ mod download;
 mod engine;
 pub mod parakeet;
 mod recorder;
+// pub: чтобы headless-пример voiceclean_test мог дергать clean_voice напрямую.
+pub mod voiceclean;
 
 use engine::{
     AudioChunkCallback, AudioResult, Engine, EngineError, GenerateRequest, LoadModelRequest,
@@ -210,7 +212,7 @@ fn engine_package_base_url(url: &str) -> String {
 /// the app writes (models, speakers, engine, whisper, webview state) lives here
 /// so the whole folder can be moved or deleted without leaving anything behind
 /// in the user profile. Replaces the old `~/audiocpp` layout.
-fn app_root_dir() -> PathBuf {
+pub(crate) fn app_root_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
@@ -221,7 +223,7 @@ fn default_engine_download_dir() -> PathBuf {
     app_root_dir().join("resources").join("engine")
 }
 
-fn user_models_root() -> PathBuf {
+pub(crate) fn user_models_root() -> PathBuf {
     app_root_dir().join("models")
 }
 
@@ -1412,6 +1414,111 @@ async fn download_sortformer(
     Ok(serde_json::json!({ "path": result.path, "size": result.size }))
 }
 
+// ─── Очистка голоса (Mel-Band Roformer / BSRoformer.cpp) ─────────────────────
+
+/// Установлены ли обе части очистки голоса (сайдкар-движок + GGUF-модель).
+/// Для UI: показать статус-строку с кнопкой скачивания, как у диаризации.
+#[tauri::command]
+fn voiceclean_status() -> serde_json::Value {
+    serde_json::json!({
+        "installed": voiceclean::is_installed(),
+        "engineInstalled": voiceclean::engine_cli_path().is_some(),
+        "modelInstalled": voiceclean::model_path().exists(),
+        "modelPath": voiceclean::model_path().to_string_lossy(),
+    })
+}
+
+/// Скачать движок (zip → распаковка в resources/bsroformer) и модель
+/// (models/bsroformer) одним пресетом. Прогресс — та же машина `download-progress`.
+#[tauri::command]
+async fn download_voiceclean(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let control = state.download_control.clone();
+
+    // 1) Движок: качаем zip во временную папку той же прогресс-машиной, затем
+    //    распаковываем плоско в resources/bsroformer (exe + ggml-DLL).
+    if voiceclean::engine_cli_path().is_none() {
+        let engine_dir = voiceclean::engine_dir();
+        std::fs::create_dir_all(&engine_dir).map_err(|e| e.to_string())?;
+        let tmp_dir = std::env::temp_dir();
+        let app_dl = app.clone();
+        let control_dl = control.clone();
+        let zip_res = tauri::async_runtime::spawn_blocking(move || {
+            download::download_file(
+                voiceclean::ENGINE_ZIP_URL,
+                &tmp_dir,
+                Some("bsroformer-engine.zip"),
+                &app_dl,
+                control_dl,
+            )
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+
+        let zip_path = PathBuf::from(&zip_res.path);
+        let engine_dir2 = engine_dir.clone();
+        tauri::async_runtime::spawn_blocking(move || voiceclean_extract_zip(&zip_path, &engine_dir2))
+            .await
+            .map_err(|e| format!("task join error: {e}"))??;
+        let _ = std::fs::remove_file(&zip_res.path);
+    }
+
+    // 2) Модель: обычный файл в models/bsroformer.
+    if !voiceclean::model_path().exists() {
+        let dest_dir = voiceclean::model_dir();
+        let app_dl = app.clone();
+        let control_dl = control.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            download::download_file(
+                voiceclean::MODEL_URL,
+                &dest_dir,
+                Some(voiceclean::MODEL_FILE),
+                &app_dl,
+                control_dl,
+            )
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(serde_json::json!({ "installed": voiceclean::is_installed() }))
+}
+
+/// Распаковать плоский zip движка (exe + ggml-DLL) в целевую папку.
+fn voiceclean_extract_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("открыть архив движка: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("архив движка не zip: {e}"))?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("чтение записи архива: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        // Плоско: берём только имя файла (в архиве нет вложенных папок, но на всякий).
+        let name = entry.name().replace('\\', "/");
+        let leaf = name.rsplit('/').next().unwrap_or(&name).to_string();
+        if leaf.is_empty() {
+            continue;
+        }
+        let out = dest_dir.join(&leaf);
+        let tmp = out.with_extension("part");
+        {
+            let mut f =
+                std::fs::File::create(&tmp).map_err(|e| format!("создать {}: {e}", tmp.display()))?;
+            std::io::copy(&mut entry, &mut f)
+                .map_err(|e| format!("распаковка {leaf}: {e}"))?;
+        }
+        std::fs::rename(&tmp, &out).map_err(|e| format!("финализация {leaf}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Полный пайплайн вкладки: декод -> (диаризация Sortformer, если модель есть и
 /// `diarize=true`) -> транскрипция по репликам, иначе посегментная транскрипция
 /// всего клипа. Прогресс-стадии эмитятся как события `transcript-progress`.
@@ -1472,18 +1579,53 @@ async fn diarize_transcribe(
 /// фронт заводит по ним персону тем же механизмом, что импорт войспака.
 #[tauri::command]
 async fn build_speaker_voice(
+    app: AppHandle,
     audio_path: String,
     segments: Vec<parakeet::SpeakerSegment>,
     speaker: i32,
     speaker_name: String,
+    clean_voice: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let wav_path = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
-    let (wav_bytes, ref_text) = tauri::async_runtime::spawn_blocking(move || {
+    let (mut wav_bytes, ref_text) = tauri::async_runtime::spawn_blocking(move || {
         // до ~30с реф под Higgs-клон, паузы ~0.3с между кусками.
         parakeet::build_speaker_reference(&wav_path, &segments, speaker, 30.0, 0.3)
     })
     .await
     .map_err(|e| format!("task join error: {e}"))??;
+
+    // Очистка голоса ПОСЛЕ склейки сегментов референса (тот же тумблер, что и на
+    // остальных путях). Если движок/модель не установлены — пропускаем.
+    if clean_voice.unwrap_or(true) && voiceclean::is_installed() {
+        let _ = app.emit("voiceclean-progress", serde_json::json!({ "phase": "cleaning" }));
+        // Собранный реф записываем во временный WAV, гоним через сепаратор, читаем стем.
+        let raw_bytes = wav_bytes.clone();
+        let cleaned: Result<Vec<u8>, String> = tauri::async_runtime::spawn_blocking(move || {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0);
+            let raw = std::env::temp_dir().join(format!("higgs_spk_raw_{stamp}.wav"));
+            std::fs::write(&raw, &raw_bytes).map_err(|e| format!("запись реф-wav: {e}"))?;
+            let out = voiceclean::clean_voice(&raw.to_string_lossy())?;
+            let bytes = std::fs::read(&out).map_err(|e| format!("чтение очищенного стема: {e}"))?;
+            let _ = std::fs::remove_file(&raw);
+            let _ = std::fs::remove_file(&out);
+            Ok(bytes)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?;
+        match cleaned {
+            Ok(bytes) => wav_bytes = bytes,
+            Err(e) => {
+                let _ = app.emit(
+                    "voiceclean-progress",
+                    serde_json::json!({ "phase": "error", "message": e }),
+                );
+            }
+        }
+        let _ = app.emit("voiceclean-progress", serde_json::json!({ "phase": "done" }));
+    }
 
     // Записать во временный файл (фронт скопирует его в папку персоны).
     let safe: String = speaker_name
@@ -3757,14 +3899,45 @@ fn audio_waveform(audio_path: String, points: Option<usize>) -> Result<serde_jso
 
 #[tauri::command]
 async fn prepare_reference_upload(
+    app: AppHandle,
     audio_path: String,
     max_seconds: Option<f64>,
+    clean_voice: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let max_seconds = max_seconds
         .filter(|seconds| *seconds > 0.0)
         .unwrap_or(REFERENCE_MAX_SECONDS);
+    // Очистка голоса (вокал-сепарация) до кропа: убираем фон/музыку из референса,
+    // чтобы клон цеплялся за чистый голос. Тумблер в UI включён по умолчанию;
+    // если движок/модель не скачаны — молча пропускаем (UI покажет статус-строку).
+    let want_clean = clean_voice.unwrap_or(true) && voiceclean::is_installed();
+    let source_path = if want_clean {
+        let src = audio_path.clone();
+        let app_clean = app.clone();
+        let _ = app_clean.emit("voiceclean-progress", serde_json::json!({ "phase": "cleaning" }));
+        let cleaned = tauri::async_runtime::spawn_blocking(move || {
+            let wav = audio::ensure_wav(&src).map_err(|e| e.to_string())?;
+            voiceclean::clean_voice(&wav)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?;
+        let _ = app_clean.emit("voiceclean-progress", serde_json::json!({ "phase": "done" }));
+        match cleaned {
+            Ok(path) => path,
+            // Очистка не должна ронять загрузку референса — падаем на оригинал.
+            Err(e) => {
+                let _ = app_clean.emit(
+                    "voiceclean-progress",
+                    serde_json::json!({ "phase": "error", "message": e }),
+                );
+                audio_path.clone()
+            }
+        }
+    } else {
+        audio_path.clone()
+    };
     let prepared = tauri::async_runtime::spawn_blocking(move || {
-        audio::prepare_reference_wav(&audio_path, false, 0.95, Some(max_seconds))
+        audio::prepare_reference_wav(&source_path, false, 0.95, Some(max_seconds))
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
@@ -4147,6 +4320,8 @@ pub fn run() {
             build_speaker_voice,
             sortformer_status,
             download_sortformer,
+            voiceclean_status,
+            download_voiceclean,
             unload_asr,
             normalize_wav,
             recorder::start_recording,

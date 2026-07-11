@@ -108,6 +108,9 @@ let finishPersonaId = "";
 let cloneRefName = "";
 let finishRefName = "";
 let selectedGalleryPersonaId = "";
+// Очистка голоса (вокал-сепарация референсов перед клонированием). Включена по
+// умолчанию — чистый голос даёт лучший клон. Персистится между сессиями.
+let voiceCleanEnabled = (localStorage.getItem("higgsAudio.voiceClean") ?? "true") !== "false";
 let lastResult: GenerationResult | null = null;
 const outputByMode: Partial<Record<Mode, GenerationResult>> = {};
 let history: HistoryEntry[] = [];
@@ -1245,6 +1248,7 @@ function switchMode(mode: Mode): void {
   const isUtility = mode === "history" || mode === "api" || mode === "speakers" || mode === "batch" || mode === "transcript";
   if (mode === "batch") refreshBatchPersonaOptions();
   if (mode === "transcript") void refreshTranscriptModelNote();
+  if (mode === "transcript" || mode === "clone") void refreshVoiceCleanNote();
   el<HTMLElement>("#advanced-details").classList.toggle("hidden", isUtility);
   el<HTMLElement>("#action-row").classList.toggle("hidden", isUtility);
   el<HTMLElement>("#progress-section").classList.toggle("hidden", isUtility || !isGenerating || activeGenerationJob?.mode !== mode);
@@ -2043,11 +2047,19 @@ async function pickAudioFile(): Promise<{ path: string; name: string } | null> {
   return { path, name: path.split(/[/\\]/).pop() || path };
 }
 
-async function prepareReferenceAudioFile(path: string, name?: string): Promise<{ path: string; name: string; cropped: boolean }> {
+async function prepareReferenceAudioFile(
+  path: string,
+  name?: string,
+  cleanVoice?: boolean,
+): Promise<{ path: string; name: string; cropped: boolean }> {
   const originalName = name || path.split(/[/\\]/).pop() || "reference audio";
+  // По умолчанию берём глобальную настройку тумблера; вызывающий может её
+  // переопределить (например, реф уже очищен на предыдущем шаге).
+  const clean = cleanVoice ?? voiceCleanEnabled;
   const result = await invoke<PreparedReferenceUpload>("prepare_reference_upload", {
     audioPath: path,
     maxSeconds: HIGGS_REFERENCE_MAX_SECONDS,
+    cleanVoice: clean,
   });
   if (result.cropped) {
     showToast(`Reference cropped to first ${HIGGS_REFERENCE_MAX_SECONDS} seconds`, "warning");
@@ -4574,6 +4586,54 @@ async function downloadDiarizationModel(): Promise<void> {
   }
 }
 
+// ── Очистка голоса (вокал-сепарация) — статус модели/движка и скачивание ──
+async function refreshVoiceCleanNote(): Promise<void> {
+  let installed = false;
+  try {
+    const status = await invoke<{ installed: boolean }>("voiceclean_status");
+    installed = status.installed;
+  } catch (e) {
+    installed = false;
+  }
+  const noteText = installed
+    ? t("Voice-cleaning model ready.")
+    : t("Voice-cleaning engine not downloaded — references used as-is.");
+  for (const [noteSel, btnSel] of [
+    ["#transcript-voiceclean-note", "#transcript-download-voiceclean"],
+    ["#clone-voiceclean-note", "#clone-download-voiceclean"],
+  ] as const) {
+    const note = document.querySelector<HTMLElement>(noteSel);
+    const btn = document.querySelector<HTMLButtonElement>(btnSel);
+    if (note) note.textContent = noteText;
+    if (btn) btn.classList.toggle("hidden", installed);
+  }
+}
+
+async function downloadVoiceCleanModel(triggerSel: string): Promise<void> {
+  const btn = document.querySelector<HTMLButtonElement>(triggerSel);
+  if (btn) btn.disabled = true;
+  showToast(t("Downloading voice-cleaning model…"));
+  try {
+    await invoke("download_voiceclean");
+    showToast(t("Voice-cleaning model downloaded."));
+    await refreshVoiceCleanNote();
+  } catch (e) {
+    showToast(`${t("Model download failed")}: ${e}`, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// Держим оба тумблера «Очистка голоса» синхронными и персистим выбор.
+function setVoiceCleanEnabled(on: boolean): void {
+  voiceCleanEnabled = on;
+  localStorage.setItem("higgsAudio.voiceClean", on ? "true" : "false");
+  for (const sel of ["#transcript-voiceclean", "#clone-voiceclean"]) {
+    const toggle = document.querySelector<HTMLInputElement>(sel);
+    if (toggle && toggle.checked !== on) toggle.checked = on;
+  }
+}
+
 function setTranscriptSource(path: string, label: string): void {
   transcriptSourcePath = path;
   transcriptSourceLabel = label;
@@ -4814,10 +4874,12 @@ async function makeSpeakerVoice(speaker: number, btn: HTMLButtonElement): Promis
       segments: transcriptResult.segments as TranscriptSegment[],
       speaker,
       speakerName: name,
+      cleanVoice: voiceCleanEnabled,
     });
     const persona = createBlankPersona();
     persona.name = name;
-    const prepared = await prepareReferenceAudioFile(built.path, `${name}.wav`);
+    // Реф уже очищен в build_speaker_voice — не гоняем сепаратор повторно.
+    const prepared = await prepareReferenceAudioFile(built.path, `${name}.wav`, false);
     const stored = await storeSpeakerAsset(persona, prepared.path, "audio");
     persona.refPath = stored.path;
     persona.refName = prepared.name || stored.fileName;
@@ -4891,6 +4953,18 @@ function initTranscriptTab(): void {
   el("#transcript-pick-btn").addEventListener("click", () => void pickTranscriptFile());
   el("#transcript-source-clear").addEventListener("click", () => clearTranscriptSource());
   el("#transcript-download-diar").addEventListener("click", () => void downloadDiarizationModel());
+  // Тумблеры «Очистка голоса» (транскрипт + клон) синхронны, дефолт — из настройки.
+  for (const sel of ["#transcript-voiceclean", "#clone-voiceclean"]) {
+    const toggle = document.querySelector<HTMLInputElement>(sel);
+    if (toggle) {
+      toggle.checked = voiceCleanEnabled;
+      toggle.addEventListener("change", () => setVoiceCleanEnabled(toggle.checked));
+    }
+  }
+  el("#transcript-download-voiceclean").addEventListener("click", () => void downloadVoiceCleanModel("#transcript-download-voiceclean"));
+  const cloneDlVoiceClean = document.querySelector<HTMLButtonElement>("#clone-download-voiceclean");
+  if (cloneDlVoiceClean) cloneDlVoiceClean.addEventListener("click", () => void downloadVoiceCleanModel("#clone-download-voiceclean"));
+  void refreshVoiceCleanNote();
   el("#transcript-run-btn").addEventListener("click", () => void runTranscription());
   el("#transcript-export-txt").addEventListener("click", () => void exportTranscript("txt"));
   el("#transcript-export-srt").addEventListener("click", () => void exportTranscript("srt"));
@@ -6196,6 +6270,13 @@ async function initEventListeners(): Promise<void> {
       setText("#download-speed-text", activeDownloadFileLabel ? `${activeDownloadFileLabel} · ${speed}` : speed);
     }
     updateDownloadIndicator(p.status);
+  });
+
+  // Очистка голоса: показать статус, пока сепаратор гоняет референс.
+  await listen<{ phase: string; message?: string }>("voiceclean-progress", (event) => {
+    const { phase, message } = event.payload;
+    if (phase === "cleaning") showToast(t("Cleaning voice…"));
+    else if (phase === "error") showToast(`${t("Voice cleaning failed, using reference as-is")}: ${message ?? ""}`, "warning");
   });
 
   await listen<ApiLogEvent>("api-log", (event) => {

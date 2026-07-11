@@ -9,3 +9,9 @@ vite-dev.log
 src-tauri/resources/engine/*
 !src-tauri/resources/engine/.gitkeep
 !src-tauri/resources/engine/README.txt
+
+# Движок вокал-сепарации BSRoformer.cpp (сайдкар exe + ggml DLL). Скачивается
+# лениво в приложении при первом включении «Очистки голоса», в git не кладём.
+src-tauri/resources/bsroformer/*
+!src-tauri/resources/bsroformer/.gitkeep
+!src-tauri/resources/bsroformer/README.txt

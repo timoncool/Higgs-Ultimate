@@ -202,6 +202,12 @@
                 <span>Normalize reference</span>
                 <span class="toggle-switch"><input type="checkbox" id="clone-normalize-ref" /><span class="toggle-slider"></span></span>
               </label>
+              <label class="inline-toggle reference-normalize-toggle">
+                <span>Clean voice (remove background)</span>
+                <span class="toggle-switch"><input type="checkbox" id="clone-voiceclean" checked /><span class="toggle-slider"></span></span>
+              </label>
+              <span id="clone-voiceclean-note" class="input-hint"></span>
+              <button id="clone-download-voiceclean" class="compact-button hidden" type="button">⬇ Download voice-cleaning model (~415 MB)</button>
             </div>
             <div class="input-group">
               <div class="label-row">
@@ -705,6 +711,12 @@ Third phrase."></textarea>
               </label>
               <span id="transcript-sortformer-note" class="input-hint"></span>
               <button id="transcript-download-diar" class="compact-button hidden" type="button">⬇ Download diarization model (~470 MB)</button>
+              <label class="inline-toggle">
+                <span>Clean voice (remove background)</span>
+                <span class="toggle-switch"><input type="checkbox" id="transcript-voiceclean" checked /><span class="toggle-slider"></span></span>
+              </label>
+              <span id="transcript-voiceclean-note" class="input-hint"></span>
+              <button id="transcript-download-voiceclean" class="compact-button hidden" type="button">⬇ Download voice-cleaning model (~415 MB)</button>
             </div>
 
             <div class="action-row">

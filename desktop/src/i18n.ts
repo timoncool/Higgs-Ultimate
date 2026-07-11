@@ -455,6 +455,16 @@ export const RU: Record<string, string> = {
   "Downloading diarization model…": "Скачивание модели диаризации…",
   "Diarization model downloaded.": "Модель диаризации скачана.",
   "Model download failed": "Не удалось скачать модель",
+  // ── Очистка голоса (вокал-сепарация) ──
+  "Clean voice (remove background)": "Очистка голоса (убрать фон)",
+  "⬇ Download voice-cleaning model (~415 MB)": "⬇ Скачать модель очистки голоса (~415 МБ)",
+  "Voice-cleaning model ready.": "Модель очистки голоса готова.",
+  "Voice-cleaning engine not downloaded — references used as-is.":
+    "Движок очистки голоса не скачан — референсы используются как есть.",
+  "Downloading voice-cleaning model…": "Скачивание модели очистки голоса…",
+  "Voice-cleaning model downloaded.": "Модель очистки голоса скачана.",
+  "Cleaning voice…": "Очистка голоса…",
+  "Voice cleaning failed, using reference as-is": "Очистка не удалась, референс без изменений",
   "No ASR model set. Download the Parakeet model in Settings.":
     "Не выбрана ASR-модель. Скачайте Parakeet в настройках.",
   "Choose an audio or video file first.": "Сначала выберите аудио или видео.",
