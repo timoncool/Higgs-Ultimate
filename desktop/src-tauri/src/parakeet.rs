@@ -1,8 +1,12 @@
 //! Parakeet ASR via the `parakeet-rs` crate (ONNX Runtime, CPU).
 //!
 //! Replaces the earlier parakeet.cpp FFI (`resources/parakeet/parakeet.dll`).
-//! ONNX Runtime is statically linked into the binary by `ort`, so nothing extra
-//! ships next to the exe — only the model folder (encoder/decoder ONNX + vocab).
+//! ONNX Runtime is NOT static-linked: `ort` is built with `load-dynamic`, so at
+//! runtime it dlopens `onnxruntime.dll`. That DLL is fetched once by
+//! `ensure_onnx_runtime` (lib.rs) and placed next to the exe, portable-style —
+//! same idea as the audiocpp engine DLLs. `ORT_DYLIB_PATH` points ort at it.
+//! Besides that DLL, the only thing shipped is the model folder (encoder/decoder
+//! ONNX + vocab).
 //!
 //! The model is loaded ONCE into a warm session (keyed by the model directory)
 //! and reused across calls, so only the first transcription pays the load cost.
@@ -12,7 +16,29 @@
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use parakeet_rs::{ParakeetTDT, TimestampMode, Transcriber};
+use parakeet_rs::{ExecutionConfig, ParakeetTDT, TimestampMode, Transcriber};
+
+/// ONNX execution config for the ASR/diarization sessions. Lowers the graph
+/// optimization level to Level1: on the int8 quant the default Level3 optimizer
+/// hangs for minutes when creating the CPU session (it spins on
+/// DynamicQuantizeLinear/MatMulInteger). Overridable via `HIGGS_ASR_OPT_LEVEL`
+/// (0=Disable, 1=Level1, 2=Level2, 3=Level3) for benchmarking.
+pub fn exec_config() -> ExecutionConfig {
+    use ort::session::builder::GraphOptimizationLevel;
+    let level = std::env::var("HIGGS_ASR_OPT_LEVEL")
+        .ok()
+        .and_then(|s| s.trim().parse::<u8>().ok())
+        .unwrap_or(1);
+    ExecutionConfig::new().with_custom_configure(move |b| {
+        let lvl = match level {
+            0 => GraphOptimizationLevel::Disable,
+            2 => GraphOptimizationLevel::Level2,
+            3 => GraphOptimizationLevel::Level3,
+            _ => GraphOptimizationLevel::Level1,
+        };
+        Ok(b.with_optimization_level(lvl)?)
+    })
+}
 
 /// A warm TDT model, kept alive and reused across transcriptions. `dir` is the
 /// model folder it was loaded from — a different folder forces a reload.
@@ -100,7 +126,7 @@ pub fn transcribe(model_dir: &Path, wav_path: &str) -> Result<String, String> {
     // Load once; reload only if a different model directory is requested.
     let need_reload = guard.as_ref().map(|s| s.dir != dir).unwrap_or(true);
     if need_reload {
-        let model = ParakeetTDT::from_pretrained(model_dir, None)
+        let model = ParakeetTDT::from_pretrained(model_dir, Some(exec_config()))
             .map_err(|e| format!("parakeet: failed to load model in {dir}: {e}"))?;
         *guard = Some(Session {
             dir: dir.clone(),

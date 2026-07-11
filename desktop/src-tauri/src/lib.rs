@@ -1252,19 +1252,24 @@ async fn generate_finish_sentence(
 // the engine DLLs). The v3 model auto-detects language — no RU/EN toggle.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// Official ONNX Runtime 1.24.2 (matches the pyke `ort` rc.12 build, API 24),
-// shipped as a NuGet package whose `runtimes/win-x64/native/onnxruntime.dll` we
-// extract next to the exe. `.nupkg` is a plain zip, opened with the `zip` crate.
-const ONNXRUNTIME_NUPKG_URL: &str =
-    "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.24.2/microsoft.ml.onnxruntime.1.24.2.nupkg";
-const ONNXRUNTIME_DLL_ENTRY: &str = "runtimes/win-x64/native/onnxruntime.dll";
+// Official ONNX Runtime 1.24.2 (matches the `ort` rc.12 build, OrtApi 24), from
+// the microsoft/onnxruntime GitHub release. The `onnxruntime-win-x64-1.24.2.zip`
+// archive carries just the CPU runtime; we extract its `lib/onnxruntime.dll`
+// (~14 MB) next to the exe. Far smaller than the NuGet package (~124 MB) which
+// bundles headers, the managed assembly and every RID's native blob.
+const ONNXRUNTIME_ZIP_URL: &str =
+    "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-1.24.2.zip";
+// The DLL lives under `<archive-root>/lib/onnxruntime.dll`. The archive root is
+// the same as the zip stem, but we match on the suffix so a renamed release
+// asset still resolves.
+const ONNXRUNTIME_DLL_ENTRY_SUFFIX: &str = "lib/onnxruntime.dll";
 
 fn onnxruntime_dll_path() -> PathBuf {
     app_root_dir().join("onnxruntime.dll")
 }
 
 /// Ensure `onnxruntime.dll` sits next to the exe (portable) and `ORT_DYLIB_PATH`
-/// points at it. Downloads + extracts it from the ONNX Runtime NuGet package on
+/// points at it. Downloads + extracts it from the ONNX Runtime GitHub release on
 /// first use. Idempotent and cheap once the DLL exists.
 fn ensure_onnx_runtime() -> Result<(), String> {
     let dll = onnxruntime_dll_path();
@@ -1273,19 +1278,26 @@ fn ensure_onnx_runtime() -> Result<(), String> {
         return Ok(());
     }
 
-    let resp = ureq::get(ONNXRUNTIME_NUPKG_URL)
+    let resp = ureq::get(ONNXRUNTIME_ZIP_URL)
         .call()
         .map_err(|e| format!("download onnxruntime runtime: {e}"))?;
     let mut buf = Vec::new();
     std::io::Read::read_to_end(&mut resp.into_body().into_reader(), &mut buf)
-        .map_err(|e| format!("read onnxruntime package: {e}"))?;
+        .map_err(|e| format!("read onnxruntime archive: {e}"))?;
 
     let reader = std::io::Cursor::new(buf);
     let mut archive =
-        zip::ZipArchive::new(reader).map_err(|e| format!("onnxruntime package is not a zip: {e}"))?;
+        zip::ZipArchive::new(reader).map_err(|e| format!("onnxruntime archive is not a zip: {e}"))?;
+
+    // The DLL is under `<root>/lib/onnxruntime.dll`; match on the suffix so a
+    // differently-named archive root still resolves.
+    let entry_name = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().replace('\\', "/")))
+        .find(|name| name.ends_with(ONNXRUNTIME_DLL_ENTRY_SUFFIX))
+        .ok_or_else(|| format!("{ONNXRUNTIME_DLL_ENTRY_SUFFIX} missing in onnxruntime archive"))?;
     let mut entry = archive
-        .by_name(ONNXRUNTIME_DLL_ENTRY)
-        .map_err(|e| format!("{ONNXRUNTIME_DLL_ENTRY} missing in package: {e}"))?;
+        .by_name(&entry_name)
+        .map_err(|e| format!("{entry_name} missing in archive: {e}"))?;
 
     let tmp = dll.with_extension("dll.tmp");
     {

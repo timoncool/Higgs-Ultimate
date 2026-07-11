@@ -1616,6 +1616,7 @@ dependencies = [
  "hound",
  "libloading 0.8.9",
  "nvml-wrapper",
+ "ort",
  "parakeet-rs",
  "serde",
  "serde_json",

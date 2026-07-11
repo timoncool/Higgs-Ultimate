@@ -23,13 +23,17 @@ hound = "3.5"
 ebur128 = "0.1"
 libloading = "0.8"
 nvml-wrapper = "0.10"
-# Parakeet ASR (NVIDIA parakeet-tdt-0.6b-v3, multilingual incl. RU) via ONNX
-# Runtime, CPU. `load-dynamic` loads onnxruntime.dll at runtime instead of
-# static-linking the prebuilt lib — this both fits the portable model (ship the
-# DLL next to the exe, like audiocpp_engine.dll) and sidesteps the MSVC-STL
-# version skew in the static prebuilt. pyke still fetches the matching dynamic
-# build at build time and stages the DLL next to the target.
-parakeet-rs = { version = "0.3", default-features = false, features = ["cpu", "ort-defaults", "load-dynamic"] }
+# Parakeet ASR (NVIDIA parakeet-tdt-0.6b-v3, multilingual incl. RU) + Sortformer v2
+# diarization via ONNX Runtime, CPU. `load-dynamic` loads onnxruntime.dll at
+# runtime instead of static-linking the prebuilt lib — this both fits the portable
+# model (ship the DLL next to the exe, like audiocpp_engine.dll, fetched on first
+# use by ensure_onnx_runtime) and sidesteps the MSVC-STL version skew that keeps
+# the static ort-sys prebuilt from linking against the local toolset (14.42).
+parakeet-rs = { version = "0.3.6", default-features = false, features = ["cpu", "ort-defaults", "load-dynamic", "sortformer"] }
+# Direct `ort` dep only for ExecutionConfig::with_custom_configure (graph
+# optimization level). Pinned to the exact rc parakeet-rs builds against so the
+# OrtApi struct matches the loaded onnxruntime.dll (mismatch = silent deadlock).
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shine-rs = "0.1.3"
