@@ -4728,8 +4728,9 @@ function renderTranscript(): void {
   const diarized = transcriptResult.diarized && transcriptResult.nSpeakers > 1;
   const nSpeakers = Math.max(1, transcriptResult.nSpeakers);
 
-  // Per-speaker header row (rename + make voice) — only when diarized.
-  if (diarized) {
+  // Per-speaker header row (rename + make voice) — always, incl. single speaker
+  // (запись самого себя — самый частый случай «сделать голос»).
+  {
     const speakersBar = document.createElement("div");
     speakersBar.className = "transcript-speakers";
     for (let sid = 0; sid < nSpeakers; sid++) {
