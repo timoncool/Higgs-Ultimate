@@ -789,13 +789,18 @@ function setWhisperModelPath(path: string): void {
   localStorage.setItem("higgsAudio.whisperModel", path);
 }
 
-function whisperPresetFilename(preset: WhisperModelPreset): string {
-  // Parakeet GGUF from mudler/parakeet-cpp-gguf is named "<id>.gguf".
-  return `${preset.id}.gguf`;
+// Destination folder (under app-root/models) where a preset's ONNX files land.
+function whisperPresetDestDir(preset: WhisperModelPreset): string {
+  return `models/parakeet/${preset.folder}`;
 }
 
-function whisperPresetUrl(preset: WhisperModelPreset): string {
-  return `${WHISPER_MODEL_RESOLVE_BASE}/${whisperPresetFilename(preset)}`;
+// The files a preset downloads, as {url, filename} pairs. The whole set is
+// fetched — a lone encoder without vocab.txt fails to load.
+function whisperPresetEntries(preset: WhisperModelPreset): Array<{ url: string; filename: string }> {
+  return preset.files.map((filename) => ({
+    url: `${WHISPER_MODEL_RESOLVE_BASE}/${filename}`,
+    filename,
+  }));
 }
 
 function selectedWhisperPreset(): WhisperModelPreset {
@@ -810,8 +815,8 @@ function populateWhisperModelSelect(): void {
   for (const preset of WHISPER_MODEL_PRESETS) {
     const option = document.createElement("option");
     option.value = preset.id;
-    option.textContent = `${preset.recommended ? "★ " : ""}${preset.id} · ${preset.size}${preset.recommended ? " · recommended" : ""}`;
-    option.title = `${whisperPresetFilename(preset)} | SHA1 ${preset.sha}`;
+    option.textContent = `${preset.recommended ? "★ " : ""}${preset.label} · ${preset.size}`;
+    option.title = `${preset.folder}/ (${preset.files.length} files)`;
     select.appendChild(option);
   }
   select.value = WHISPER_MODEL_PRESETS.some((preset) => preset.id === savedPreset) ? savedPreset : WHISPER_RECOMMENDED_MODEL;
@@ -827,10 +832,9 @@ function initWhisperPanel(): void {
     localStorage.setItem("higgsAudio.whisperPreset", whisperSelect.value);
   });
   el("#whisper-browse-btn").addEventListener("click", async () => {
-    const selected = await open({
-      filters: [{ name: "Parakeet Model", extensions: ["gguf"] }],
-    });
-    if (selected) setWhisperModelPath(selected);
+    // The Parakeet model is now a folder of ONNX files, so pick a directory.
+    const selected = await open({ directory: true });
+    if (selected) setWhisperModelPath(Array.isArray(selected) ? selected[0] : selected);
   });
   el("#whisper-models-link").addEventListener("click", () => openExternalUrl(WHISPER_MODEL_TREE_URL));
 }
@@ -5231,14 +5235,16 @@ function initDownload(): void {
         ? t("Download Engine DLLs")
         : t("Download Model");
     urlInput.placeholder = kind === "whisper"
-      ? t("Paste Parakeet GGUF URL…")
+      ? t("Parakeet ONNX model repo…")
       : kind === "engine"
         ? t("Engine package URL…")
         : t("Paste HuggingFace GGUF URL…");
     presetRow.classList.toggle("hidden", kind !== "model");
     if (kind === "whisper") {
-      urlInput.value = whisperPresetUrl(whisperPreset);
-      urlInput.title = `${whisperPreset.id} (${whisperPreset.size})`;
+      // A Parakeet variant is a folder of files, not a single URL. Show the repo
+      // folder for reference; the actual file set is resolved on fetch.
+      urlInput.value = WHISPER_MODEL_TREE_URL;
+      urlInput.title = `${whisperPreset.label} → ${whisperPresetDestDir(whisperPreset)} (${whisperPreset.files.length} files)`;
     } else if (kind === "engine") {
       urlInput.value = ENGINE_PACKAGE_URL;
       urlInput.title = "Downloads audiocpp_engine.dll plus required CUDA/MSVC runtime DLLs";
@@ -5270,11 +5276,27 @@ function initDownload(): void {
         const result = await invoke<{ path: string; size: number }>("download_engine_dll", { url });
         showToast(`Engine DLLs downloaded: ${result.path}`);
       } else if (kind === "whisper") {
-        const result = await invoke<{ path: string; size: number }>("download_model", {
-          request: { url, destDir: "models/parakeet", filename: null },
-        });
-        localStorage.setItem("higgsAudio.whisperPreset", selectedWhisperPreset().id);
-        setWhisperModelPath(result.path);
+        // Fetch the WHOLE ONNX file set into the variant folder. Downloading just
+        // one file (e.g. the encoder without vocab.txt) makes the model fail to
+        // load — same class of bug as the Higgs "missing config" case below.
+        const preset = selectedWhisperPreset();
+        const destDir = whisperPresetDestDir(preset);
+        const entries = whisperPresetEntries(preset);
+        let modelFolder = "";
+        for (let index = 0; index < entries.length; index += 1) {
+          const entry = entries[index];
+          activeDownloadFileLabel = `File ${index + 1}/${entries.length}: ${entry.filename}`;
+          setText("#download-speed-text", `${activeDownloadFileLabel} · 0 MB/s`);
+          const result = await invoke<{ path: string; size: number }>("download_model", {
+            request: { url: entry.url, destDir, filename: entry.filename },
+          });
+          // The model path is the FOLDER (parent of each downloaded file).
+          if (!modelFolder) {
+            modelFolder = result.path.replace(/[/\\][^/\\]+$/, "");
+          }
+        }
+        localStorage.setItem("higgsAudio.whisperPreset", preset.id);
+        if (modelFolder) setWhisperModelPath(modelFolder);
         showToast("Parakeet model downloaded");
       } else {
         const selectedPreset = ttsPresetById(presetSelect.value);

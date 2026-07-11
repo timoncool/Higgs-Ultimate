@@ -11,10 +11,15 @@ export type TtsModelPreset = {
   recommended?: boolean;
 };
 
+// A Parakeet ASR model variant. `folder` is the sub-directory under
+// models/parakeet where its ONNX files live; `files` is the exact set of files
+// to download (the whole set — never just one, or the model fails to load).
 export type WhisperModelPreset = {
   id: string;
+  label: string;
+  folder: string;
+  files: string[];
   size: string;
-  sha: string;
   recommended?: boolean;
 };
 

@@ -55,7 +55,8 @@ export const RU: Record<string, string> = {
   // ── Whisper panel ──
   "Choose model": "Выбрать модель",
   "Parakeet model": "Модель Parakeet",
-  "Selected file": "Выбранный файл",
+  "Selected folder": "Выбранная папка",
+  "Select the Parakeet model folder…": "Выберите папку модели Parakeet…",
   "Select ggml-base.en.bin…": "Выберите файл ggml…",
 
   // ── Hardware panel ──
@@ -292,7 +293,7 @@ export const RU: Record<string, string> = {
   "Close": "Закрыть",
   "Model file": "Файл модели",
   "Paste HuggingFace GGUF URL…": "Вставьте ссылку на GGUF с HuggingFace…",
-  "Paste Parakeet GGUF URL…": "Вставьте ссылку на GGUF Parakeet…",
+  "Parakeet ONNX model repo…": "Репозиторий ONNX-модели Parakeet…",
   "Engine package URL…": "URL пакета движка…",
   "Fetch": "Скачать",
   "Pause": "Пауза",
@@ -397,7 +398,7 @@ export const RU: Record<string, string> = {
   "Select saved identity…": "Выбрать сохранённый голос…",
   "Drop reference voice, or click to browse": "Перетащите референс-голос или нажмите для выбора",
   "Optional line-specific reference voice": "Необязательный референс для этой реплики",
-  "Optional. Auto-filled with Parakeet when available.": "Необязательно. Автозаполнение через Whisper, если доступно.",
+  "Optional. Auto-filled with Parakeet when available.": "Необязательно. Автозаполнение через Parakeet, если доступно.",
   "Optional notes for this identity": "Необязательные заметки об этом голосе",
   "Collapse speaker": "Свернуть спикера",
   "Expand speaker": "Развернуть спикера",

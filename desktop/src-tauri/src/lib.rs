@@ -1243,30 +1243,34 @@ async fn generate_finish_sentence(
 // ═══════════════════════════════════════════════════════════════════════════
 // Transcription (Parakeet — NVIDIA parakeet-tdt-0.6b-v3, multilingual incl. RU)
 //
-// Replaces whisper.cpp. ASR is decoupled from the C++ TTS engine: we shell out
-// to the self-contained `parakeet-cli.exe` (parakeet.cpp, CPU build) bundled in
-// resources/parakeet/. The v3 model auto-detects language, so no RU/EN toggle.
+// ASR is decoupled from the C++ TTS engine and runs in-process via the
+// `parakeet-rs` crate (ONNX Runtime, CPU). The model lives in a folder of ONNX
+// files next to the exe (models/parakeet/<variant>); ONNX Runtime is statically
+// linked, so no extra DLL ships. The v3 model auto-detects language — no toggle.
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Locate the bundled `parakeet.dll` (in resources/parakeet next to the exe).
-fn find_parakeet_library() -> Option<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    if let Some(d) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-    {
-        dirs.push(d.join("resources").join("parakeet"));
-        dirs.push(d.join("parakeet"));
+/// Resolve the ASR model directory from the path the frontend stored. This is a
+/// folder holding the ONNX files (encoder/decoder + vocab.txt). For robustness
+/// we accept either the folder itself or any file inside it (older stored paths
+/// may point at a weight file), taking that file's parent directory.
+fn resolve_asr_model_dir(stored: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(stored);
+    let dir = if p.is_dir() {
+        p
+    } else if p.is_file() {
+        p.parent()
+            .map(|d| d.to_path_buf())
+            .ok_or_else(|| "ASR model path has no parent directory".to_string())?
+    } else {
+        return Err(format!("ASR model folder not found: {stored}"));
+    };
+    if !dir.join("vocab.txt").exists() {
+        return Err(format!(
+            "ASR model folder is missing vocab.txt: {}",
+            dir.display()
+        ));
     }
-    dirs.push(app_root_dir().join("resources").join("parakeet"));
-    dirs.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources")
-            .join("parakeet"),
-    );
-    dirs.into_iter()
-        .map(|d| d.join("parakeet.dll"))
-        .find(|p| p.exists())
+    Ok(dir)
 }
 
 #[tauri::command]
@@ -1279,12 +1283,11 @@ async fn transcribe_audio(
     let model_path = whisper_model_path
         .filter(|p| !p.is_empty())
         .ok_or_else(|| "No ASR model set. Download the Parakeet model in Settings.".to_string())?;
-    let dll = find_parakeet_library()
-        .ok_or_else(|| "parakeet.dll not found (resources/parakeet is missing).".to_string())?;
+    let model_dir = resolve_asr_model_dir(&model_path)?;
     let wav_path = audio::ensure_wav(&audio_path).map_err(|e| e.to_string())?;
 
     let text = tauri::async_runtime::spawn_blocking(move || {
-        parakeet::transcribe(&dll, &model_path, &wav_path, 0)
+        parakeet::transcribe(&model_dir, &wav_path)
     })
     .await
     .map_err(|e| format!("task join error: {e}"))??;

@@ -17,12 +17,13 @@ export const HIGGS_RECOMMENDED_MODEL = "higgs-q8_0";
 export const ENGINE_PACKAGE_URL = `${HIGGS_MODEL_RESOLVE_BASE}/engines`;
 export const ENGINE_DLL_URL = `${ENGINE_PACKAGE_URL}/audiocpp_engine.dll`;
 // ASR = Parakeet (NVIDIA parakeet-tdt-0.6b-v3, multilingual incl. Russian) via
-// parakeet.cpp — replaces whisper. Single GGUF from mudler's official repo.
+// the parakeet-rs crate (ONNX Runtime, CPU). Models are ONNX file sets from
+// istupakov's repo — a folder of files, not a single GGUF weight.
 // (The WHISPER_* names are kept to avoid churn across the download machinery.)
-export const WHISPER_MODELS_URL = "https://huggingface.co/mudler/parakeet-cpp-gguf";
+export const WHISPER_MODELS_URL = "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx";
 export const WHISPER_MODEL_TREE_URL = `${WHISPER_MODELS_URL}/tree/main`;
 export const WHISPER_MODEL_RESOLVE_BASE = `${WHISPER_MODELS_URL}/resolve/main`;
-export const WHISPER_RECOMMENDED_MODEL = "tdt-0.6b-v3-q8_0";
+export const WHISPER_RECOMMENDED_MODEL = "tdt-0.6b-v3-int8";
 export const SPEAKER_PERSONA_STORAGE_KEY = "higgsAudio.speakerPersonas";
 export const MODEL_PATH_STORAGE_KEY = "higgsAudio.selectedModelPath";
 export const ENGINE_PATH_STORAGE_KEY = "higgsAudio.selectedEnginePath";
@@ -79,12 +80,42 @@ export const HIGGS_MODEL_PRESETS: TtsModelPreset[] = [
   },
 ];
 
-// Parakeet quants from mudler/parakeet-cpp-gguf (all multilingual, incl. RU).
-// Same idea as the Higgs TTS quant picker — choose size/quality in the UI.
+// Parakeet TDT v3 ONNX variants from istupakov/parakeet-tdt-0.6b-v3-onnx (all
+// multilingual, incl. RU). parakeet-rs loads a whole folder of ONNX files, so
+// each variant lists the exact file set to fetch. The loader prefers the plain
+// (fp32) filenames when present, so int8 lives in its own folder with only the
+// .int8.onnx files — that's what makes int8 the one actually loaded.
+//
+// vocab.txt is required by the loader; config.json and nemo128.onnx are pulled
+// for completeness/forward-compat even though the current loader hardcodes the
+// preprocessor config.
 export const WHISPER_MODEL_PRESETS: WhisperModelPreset[] = [
-  { id: "tdt-0.6b-v3-q4_k", size: "~560 MB · самый лёгкий", sha: "" },
-  { id: "tdt-0.6b-v3-q5_k", size: "~640 MB", sha: "" },
-  { id: "tdt-0.6b-v3-q6_k", size: "~730 MB", sha: "" },
-  { id: "tdt-0.6b-v3-q8_0", size: "940 MB · рекомендуется", sha: "", recommended: true },
-  { id: "tdt-0.6b-v3-f16", size: "~1.2 GB · максимум качества", sha: "" },
+  {
+    id: "tdt-0.6b-v3-int8",
+    label: "Parakeet TDT v3 · INT8",
+    folder: "tdt-0.6b-v3-int8",
+    files: [
+      "encoder-model.int8.onnx",
+      "decoder_joint-model.int8.onnx",
+      "vocab.txt",
+      "config.json",
+      "nemo128.onnx",
+    ],
+    size: "~670 MB · рекомендуется",
+    recommended: true,
+  },
+  {
+    id: "tdt-0.6b-v3-fp32",
+    label: "Parakeet TDT v3 · FP32",
+    folder: "tdt-0.6b-v3-fp32",
+    files: [
+      "encoder-model.onnx",
+      "encoder-model.onnx.data",
+      "decoder_joint-model.onnx",
+      "vocab.txt",
+      "config.json",
+      "nemo128.onnx",
+    ],
+    size: "~2.5 GB · максимум качества",
+  },
 ];
