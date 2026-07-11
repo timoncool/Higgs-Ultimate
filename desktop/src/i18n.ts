@@ -331,6 +331,16 @@ export const RU: Record<string, string> = {
   "Browse": "Обзор",
   "Download": "Скачать",
   "Load": "Загрузить",
+  // ── System libraries block ──
+  // ("VC++ runtime"/"NVIDIA driver" уже есть в секции Engine diagnostics ниже —
+  //  не дублируем, TS запрещает повторные ключи в литерале.)
+  "System libraries": "Системные библиотеки",
+  "Core files": "Основные файлы",
+  "CUDA runtime": "CUDA runtime",
+  "Checking CUDA runtime DLLs...": "Проверка CUDA runtime DLL…",
+  "Checking Visual C++ runtime DLLs...": "Проверка VC++ runtime DLL…",
+  "Checking NVIDIA driver...": "Проверка драйвера NVIDIA…",
+  "Open nvidia.com/drivers": "Открыть nvidia.com/drivers",
   "Higgs model folder": "Папка модели Higgs",
   "Checking downloaded model folders...": "Проверка скачанных папок моделей…",
   "Parakeet auto-transcribe": "Автотранскрипт Parakeet",
@@ -347,6 +357,8 @@ export const RU: Record<string, string> = {
   "Copy diagnostics": "Копировать диагностику",
   "NVIDIA driver": "Драйвер NVIDIA",
   "VC++ runtime": "VC++ рантайм",
+  "Download CUDA runtime": "Скачать CUDA runtime",
+  "Download VC++ runtime": "Скачать VC++ runtime",
 
   // ── Toasts / statuses (dynamic) ──
   "A download is already running. Use Pause, Resume, or Stop.": "Загрузка уже идёт. Используйте Паузу, Продолжить или Стоп.",

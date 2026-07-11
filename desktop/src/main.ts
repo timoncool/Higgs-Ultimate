@@ -59,9 +59,12 @@ import type {
   ApiLogEvent,
   ApiServerStatus,
   DownloadKind,
+  DownloadEnvResult,
   DownloadProgressEvent,
   EngineDependencyDiagnostic,
   EngineDependencyStatus,
+  EnvCheck,
+  EnvDepKind,
   GenerationAudioChunkEvent,
   GenerationJob,
   GenerationMode,
@@ -340,9 +343,19 @@ function initEngineDiagnosticModal(): void {
     if (!lastEngineDiagnostic) return;
     void copyText(engineDiagnosticText(lastEngineDiagnostic), "Engine diagnostics");
   });
+  // Драйвер DLL-кой не ставится — открываем сайт NVIDIA. CUDA и VC++ качаем
+  // прямо из приложения (авто-закачка) вместо отправки к тяжёлым инсталляторам.
   el("#engine-diagnostic-driver").addEventListener("click", () => openExternalUrl(NVIDIA_DRIVER_URL));
-  el("#engine-diagnostic-cuda").addEventListener("click", () => openExternalUrl(CUDA_DOWNLOAD_URL));
-  el("#engine-diagnostic-vc").addEventListener("click", () => openExternalUrl(VC_REDIST_X64_URL));
+  el("#engine-diagnostic-cuda").addEventListener("click", async () => {
+    await startEnvDepDownload("cuda");
+    const diag = await diagnoseEngineForPath(lastEngineDiagnostic?.enginePath || undefined);
+    if (diag) showEngineDiagnosticModal(diag);
+  });
+  el("#engine-diagnostic-vc").addEventListener("click", async () => {
+    await startEnvDepDownload("vcruntime");
+    const diag = await diagnoseEngineForPath(lastEngineDiagnostic?.enginePath || undefined);
+    if (diag) showEngineDiagnosticModal(diag);
+  });
 }
 
 function hideSetupWizard(persist = false): void {
@@ -369,7 +382,82 @@ function setSetupCheck(
   setText(detailId, detail);
 }
 
+// Последний результат env_check — используется кнопками скачивания системных
+// библиотек, чтобы не перезапрашивать перед стартом.
+let lastEnvCheck: EnvCheck | null = null;
+
+/// Обновить три строки блока «Системные библиотеки» (CUDA / VC++ / драйвер).
+async function refreshSystemLibsState(): Promise<void> {
+  let env: EnvCheck | null = null;
+  try {
+    env = await invoke<EnvCheck>("env_check");
+  } catch {
+    env = null;
+  }
+  lastEnvCheck = env;
+  const ru = getLang() === "ru";
+
+  // CUDA runtime
+  const cudaOk = Boolean(env?.cuda.ok);
+  const cudaMb = env?.cuda.downloadMb ?? 0;
+  setSetupCheck(
+    "#setup-check-cuda",
+    "#setup-cuda-icon",
+    "#setup-cuda-detail",
+    cudaOk ? "ready" : "missing",
+    cudaOk ? "✓" : "!",
+    cudaOk
+      ? (ru ? "Найдены cudart/cublas/cublasLt 13.x." : "Found cudart/cublas/cublasLt 13.x.")
+      : (ru
+          ? `Не хватает: ${(env?.cuda.missing ?? []).join(", ") || "CUDA runtime DLL"}.`
+          : `Missing: ${(env?.cuda.missing ?? []).join(", ") || "CUDA runtime DLLs"}.`),
+  );
+  const cudaBtn = el<HTMLButtonElement>("#setup-wizard-download-cuda");
+  cudaBtn.textContent = cudaOk
+    ? (ru ? "Готово" : "Ready")
+    : (ru ? `Скачать ~${cudaMb} МБ` : `Download ~${cudaMb} MB`);
+  cudaBtn.disabled = cudaOk;
+
+  // VC++ runtime
+  const vcOk = Boolean(env?.vcruntime.ok);
+  const vcMb = env?.vcruntime.downloadMb ?? 0;
+  setSetupCheck(
+    "#setup-check-vcruntime",
+    "#setup-vcruntime-icon",
+    "#setup-vcruntime-detail",
+    vcOk ? "ready" : "missing",
+    vcOk ? "✓" : "!",
+    vcOk
+      ? (ru ? "Найдены MSVCP140/VCRUNTIME140/VCOMP140." : "Found MSVCP140/VCRUNTIME140/VCOMP140.")
+      : (ru
+          ? `Не хватает: ${(env?.vcruntime.missing ?? []).join(", ") || "VC++ runtime DLL"}.`
+          : `Missing: ${(env?.vcruntime.missing ?? []).join(", ") || "VC++ runtime DLLs"}.`),
+  );
+  const vcBtn = el<HTMLButtonElement>("#setup-wizard-download-vcruntime");
+  vcBtn.textContent = vcOk
+    ? (ru ? "Готово" : "Ready")
+    : (ru ? `Скачать ~${vcMb} МБ` : `Download ~${vcMb} MB`);
+  vcBtn.disabled = vcOk;
+
+  // Драйвер NVIDIA (скачать DLL-кой нельзя — только открыть сайт)
+  const driverOk = Boolean(env?.driver.ok);
+  const driverVer = env?.driver.version ?? "";
+  setSetupCheck(
+    "#setup-check-driver",
+    "#setup-driver-icon",
+    "#setup-driver-detail",
+    driverOk ? "ready" : "missing",
+    driverOk ? "✓" : "!",
+    driverOk
+      ? (ru ? `Установлен${driverVer ? `, версия ${driverVer}` : ""}.` : `Installed${driverVer ? `, version ${driverVer}` : ""}.`)
+      : (ru
+          ? "Не обнаружен. Установите драйвер NVIDIA — это единственное, что ставится вручную."
+          : "Not detected. Install the NVIDIA driver — the one thing you install manually."),
+  );
+}
+
 async function refreshSetupWizardState(): Promise<void> {
+  await refreshSystemLibsState();
   let engineStatus: ModelStatusEvent | null = null;
   try {
     engineStatus = await invoke<ModelStatusEvent>("engine_status");
@@ -517,7 +605,62 @@ function initSetupWizard(): void {
     hideSetupWizard(false);
     el<HTMLButtonElement>("#whisper-download-trigger").click();
   });
+  el("#setup-wizard-download-cuda").addEventListener("click", () => {
+    void startEnvDepDownload("cuda");
+  });
+  el("#setup-wizard-download-vcruntime").addEventListener("click", () => {
+    void startEnvDepDownload("vcruntime");
+  });
+  el("#setup-wizard-open-driver").addEventListener("click", () => openExternalUrl(NVIDIA_DRIVER_URL));
   el("#setup-wizard-continue").addEventListener("click", close);
+}
+
+/// Скачать недостающие системные DLL класса kind через ту же прогресс-машину
+/// (download-progress), что и модели. По завершении — повторный env_check и
+/// обновление строк блока «Системные библиотеки».
+async function startEnvDepDownload(kind: EnvDepKind): Promise<void> {
+  if (downloadActive) {
+    showToast("A download is already running. Use Pause, Resume, or Stop.", "warning");
+    return;
+  }
+  const ru = getLang() === "ru";
+  const label = kind === "cuda" ? "CUDA runtime" : "VC++ runtime";
+  activeDownloadKind = kind;
+  downloadActive = true;
+  downloadPaused = false;
+  const progressContainer = document.querySelector<HTMLElement>("#download-progress-container");
+  progressContainer?.classList.remove("hidden");
+  setProgress("#download-progress-bar", 0, 1);
+  setText("#download-size-text", "0 / 0");
+  setText("#download-speed-text", "0 MB/s");
+  activeDownloadFileLabel = label;
+  updateDownloadIndicator("running");
+  try {
+    const result = await invoke<DownloadEnvResult>("download_env_deps", { kind });
+    if (result.ok) {
+      showToast(ru ? `${label}: библиотеки установлены` : `${label}: libraries installed`);
+    } else {
+      showToast(
+        ru
+          ? `${label}: не хватает ${result.missing.join(", ")}`
+          : `${label}: still missing ${result.missing.join(", ")}`,
+        "warning",
+      );
+    }
+  } catch (e) {
+    const message = String(e);
+    if (message.toLowerCase().includes("cancel")) {
+      showToast("Download stopped", "warning");
+    } else {
+      showToast(`Download failed: ${e}`, "error");
+    }
+  } finally {
+    downloadActive = false;
+    downloadPaused = false;
+    activeDownloadFileLabel = "";
+    updateDownloadIndicator("complete");
+    await refreshSystemLibsState();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

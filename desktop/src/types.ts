@@ -14,7 +14,42 @@ export type TranscriptResult = {
   diarized: boolean;
 };
 export type SaveFormat = "wav" | "mp3";
-export type DownloadKind = "model" | "whisper" | "engine";
+export type DownloadKind = "model" | "whisper" | "engine" | "cuda" | "vcruntime";
+
+// Класс системных библиотек для автозакачки (совпадает с Rust envdeps::DepKind).
+export type EnvDepKind = "cuda" | "vcruntime";
+
+export type EnvDriverStatus = {
+  ok: boolean;
+  version?: string | null;
+};
+
+export type EnvFoundDll = {
+  name: string;
+  path: string;
+};
+
+export type EnvDllGroupStatus = {
+  ok: boolean;
+  missing: string[];
+  found: EnvFoundDll[];
+  downloadMb: number;
+};
+
+// Результат команды env_check: драйвер + CUDA runtime + VC++ runtime.
+export type EnvCheck = {
+  driver: EnvDriverStatus;
+  cuda: EnvDllGroupStatus;
+  vcruntime: EnvDllGroupStatus;
+};
+
+// Результат команды download_env_deps.
+export type DownloadEnvResult = {
+  kind: string;
+  installed: string[];
+  missing: string[];
+  ok: boolean;
+};
 
 export type TtsModelPreset = {
   id: string;

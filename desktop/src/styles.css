@@ -1892,6 +1892,17 @@ input[type="range"]::-moz-range-thumb {
   display: grid;
   gap: 8px;
 }
+.setup-section-label {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+.setup-section-label:first-child {
+  margin-top: 0;
+}
 .setup-check-row {
   align-items: center;
   background: var(--bg-inner);

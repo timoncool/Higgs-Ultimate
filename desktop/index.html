@@ -892,6 +892,39 @@ Third phrase."></textarea>
           <div class="setup-wizard-body">
             <p id="setup-wizard-summary" class="input-hint">Checking local engine and model files...</p>
             <div class="setup-check-list">
+              <!-- ── System libraries: driver + CUDA runtime + VC++ runtime ── -->
+              <div class="setup-section-label">System libraries</div>
+              <div class="setup-check-row" id="setup-check-cuda">
+                <span class="setup-check-icon" id="setup-cuda-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>CUDA runtime</strong>
+                  <span id="setup-cuda-detail">Checking CUDA runtime DLLs...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-download-cuda" class="compact-button" type="button">Download</button>
+                </span>
+              </div>
+              <div class="setup-check-row" id="setup-check-vcruntime">
+                <span class="setup-check-icon" id="setup-vcruntime-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>VC++ runtime</strong>
+                  <span id="setup-vcruntime-detail">Checking Visual C++ runtime DLLs...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-download-vcruntime" class="compact-button" type="button">Download</button>
+                </span>
+              </div>
+              <div class="setup-check-row" id="setup-check-driver">
+                <span class="setup-check-icon" id="setup-driver-icon">...</span>
+                <span class="setup-check-main">
+                  <strong>NVIDIA driver</strong>
+                  <span id="setup-driver-detail">Checking NVIDIA driver...</span>
+                </span>
+                <span class="setup-check-actions">
+                  <button id="setup-wizard-open-driver" class="compact-button" type="button">Open nvidia.com/drivers</button>
+                </span>
+              </div>
+              <div class="setup-section-label">Core files</div>
               <div class="setup-check-row" id="setup-check-engine">
                 <span class="setup-check-icon" id="setup-engine-icon">...</span>
                 <span class="setup-check-main">
@@ -963,9 +996,9 @@ Third phrase."></textarea>
           </div>
           <div class="modal-actions">
             <button id="engine-diagnostic-copy" class="compact-button" type="button">Copy diagnostics</button>
-            <button id="engine-diagnostic-driver" class="compact-button" type="button">NVIDIA driver</button>
-            <button id="engine-diagnostic-cuda" class="compact-button" type="button">CUDA 13.x</button>
-            <button id="engine-diagnostic-vc" class="compact-button primary" type="button">VC++ runtime</button>
+            <button id="engine-diagnostic-driver" class="compact-button" type="button">Open nvidia.com/drivers</button>
+            <button id="engine-diagnostic-cuda" class="compact-button" type="button">Download CUDA runtime</button>
+            <button id="engine-diagnostic-vc" class="compact-button primary" type="button">Download VC++ runtime</button>
           </div>
         </section>
       </div>
