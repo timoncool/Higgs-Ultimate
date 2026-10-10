@@ -29,7 +29,7 @@ jobs:
           wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
           sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends cuda-nvcc-13-3 cuda-cudart-dev-13-3 libcublas-dev-13-3 ninja-build patchelf
+          sudo apt-get install -y -q --no-install-recommends cuda-nvcc-13-3 cuda-cudart-dev-13-3 libcublas-dev-13-3 libcufft-dev-13-3 ninja-build patchelf
           echo /usr/local/cuda-13.3/bin >> "$GITHUB_PATH"
 
       - name: Build
