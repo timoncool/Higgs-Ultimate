@@ -40,7 +40,7 @@ jobs:
             -DCMAKE_CUDA_ARCHITECTURES="75-real;80-real;86-real;89-real;90-real;120a-real" \
             -DENGINE_ENABLE_CUDA=ON -DENGINE_ENABLE_CUDA_GRAPHS=ON -DENGINE_ENABLE_OPENMP=ON \
             -DENGINE_ENABLE_VULKAN=OFF -DENGINE_ENABLE_METAL=OFF \
-            -DGGML_OPENMP=ON -DGGML_NATIVE=OFF -DENGINE_BUILD_DESKTOP_API=ON
+            -DGGML_OPENMP=ON -DGGML_NATIVE=OFF -DENGINE_BUILD_DESKTOP_API=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build build --target audiocpp_engine -j "$(nproc)"
 
       - name: Package
