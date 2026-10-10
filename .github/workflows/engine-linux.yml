@@ -1,0 +1,68 @@
+name: Engine (Linux)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit to build"
+        required: true
+        default: "ed085db"
+      tag:
+        description: "Release to attach libaudiocpp_engine.so to; empty builds only"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  engine:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: recursive
+
+      - name: CUDA 13.3
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends cuda-nvcc-13-3 cuda-cudart-dev-13-3 libcublas-dev-13-3 ninja-build patchelf
+          echo /usr/local/cuda-13.3/bin >> "$GITHUB_PATH"
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCUDAToolkit_ROOT=/usr/local/cuda-13.3 \
+            -DCMAKE_CUDA_ARCHITECTURES="75-real;80-real;86-real;89-real;90-real;120a-real" \
+            -DENGINE_ENABLE_CUDA=ON -DENGINE_ENABLE_CUDA_GRAPHS=ON -DENGINE_ENABLE_OPENMP=ON \
+            -DENGINE_ENABLE_VULKAN=OFF -DENGINE_ENABLE_METAL=OFF \
+            -DGGML_OPENMP=ON -DGGML_NATIVE=OFF -DENGINE_BUILD_DESKTOP_API=ON
+          cmake --build build --target audiocpp_engine -j "$(nproc)"
+
+      - name: Package
+        run: |
+          so=$(find build -name 'audiocpp_engine.so' -type f | head -1)
+          mkdir -p out
+          cp "$so" out/libaudiocpp_engine.so
+          # the CUDA libraries the studios ship sit beside the engine
+          patchelf --set-rpath '$ORIGIN' out/libaudiocpp_engine.so
+          strip --strip-unneeded out/libaudiocpp_engine.so
+          readelf -d out/libaudiocpp_engine.so | grep -E 'NEEDED|RUNPATH'
+          cuobjdump --list-elf out/libaudiocpp_engine.so | grep -o 'sm_[0-9a]*' | sort -u
+          ls -l out/libaudiocpp_engine.so
+          sha256sum out/libaudiocpp_engine.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libaudiocpp_engine-linux-x64
+          path: out/libaudiocpp_engine.so
+
+      - name: Attach to release
+        if: inputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" out/libaudiocpp_engine.so --clobber --repo "${{ github.repository }}"
