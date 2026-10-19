@@ -1,4 +1,5 @@
 import "./styles.css";
+import { getLang, setLang, t, translateStaticDom } from "./i18n";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -239,7 +240,7 @@ function renderDependencyList(container: HTMLElement, deps: EngineDependencyStat
   if (!deps.length) {
     const empty = document.createElement("div");
     empty.className = `engine-diagnostic-item ${statusClass}`;
-    empty.innerHTML = `<strong>${statusClass === "missing" ? "None" : "Nothing detected yet"}</strong>`;
+    empty.innerHTML = `<strong>${statusClass === "missing" ? t("None") : t("Nothing detected yet")}</strong>`;
     container.appendChild(empty);
     return;
   }
@@ -392,10 +393,10 @@ async function refreshSetupWizardState(): Promise<void> {
   let engineReady = Boolean(engineStatus?.engineLoaded);
   let enginePathValid = Boolean(engineStatus?.engineLoaded);
   let engineDetail = engineStatus?.engineLoaded
-    ? "Loaded and ready"
+    ? t("Loaded and ready")
     : enginePath
       ? `Found: ${enginePath}`
-      : "Not found. Download the engine package or browse to audiocpp_engine.dll.";
+      : t("Not found. Download the engine package or browse to audiocpp_engine.dll.");
   if (!engineReady && enginePath) {
     let diagnostic = await diagnoseEngineForPath(enginePath);
     if (!diagnostic && savedEnginePath && bundledEnginePath) {
@@ -440,12 +441,12 @@ async function refreshSetupWizardState(): Promise<void> {
   }
   const modelReady = Boolean(engineStatus?.modelLoaded || selectedModel || models.length > 0);
   const modelDetail = engineStatus?.modelLoaded
-    ? "Loaded and ready"
+    ? t("Loaded and ready")
     : selectedModel
       ? `Selected: ${selectedModel}`
       : models.length > 0
         ? `${models.length} model folder${models.length === 1 ? "" : "s"} found. Select or load one.`
-        : "No Higgs model folder found. Download a model folder or browse to one.";
+        : t("No Higgs model folder found. Download a model folder or browse to one.");
   setSetupCheck(
     "#setup-check-model",
     "#setup-model-icon",
@@ -470,8 +471,8 @@ async function refreshSetupWizardState(): Promise<void> {
   setText(
     "#setup-wizard-summary",
     readyCount === 2
-      ? "Core setup found. You can load anything not already loaded, or close this wizard."
-      : "Some core setup files are missing. Use Browse if you already have them, or Download to fetch them.",
+      ? t("Core setup found. You can load anything not already loaded, or close this wizard.")
+      : t("Some core setup files are missing. Use Browse if you already have them, or Download to fetch them."),
   );
 }
 
@@ -665,6 +666,13 @@ function initSettings(): void {
       setOpen(false);
     }
   });
+
+  const langRu = el<HTMLButtonElement>("#lang-ru");
+  const langEn = el<HTMLButtonElement>("#lang-en");
+  langRu.classList.toggle("active", getLang() === "ru");
+  langEn.classList.toggle("active", getLang() === "en");
+  langRu.addEventListener("click", () => { if (getLang() !== "ru") setLang("ru"); });
+  langEn.addEventListener("click", () => { if (getLang() !== "en") setLang("en"); });
 
   el("#theme-dark").addEventListener("click", () => applyTheme("dark"));
   el("#theme-light").addEventListener("click", () => applyTheme("light"));
@@ -1404,9 +1412,9 @@ async function doLoadEngine(libraryPath?: string): Promise<void> {
     if (result.success) {
       if (libPath) setStoredPath(ENGINE_PATH_STORAGE_KEY, libPath);
       engineSupportsStreaming = Boolean(result.supportsStreaming);
-      setText("#engine-chip", "Engine loaded");
+      setText("#engine-chip", t("Engine loaded"));
       el<HTMLElement>("#engine-chip").classList.add("active");
-      showToast("Engine loaded");
+      showToast(t("Engine loaded"));
       await refreshModelList();
     }
   } catch (e) {
@@ -1439,7 +1447,7 @@ async function doLoadModel(): Promise<void> {
   }
   try {
     el<HTMLButtonElement>("#load-model-btn").disabled = true;
-    setText("#model-state", "Loading…");
+    setText("#model-state", t("Loading…"));
     const result = await invoke<{ success: boolean; modelInfo: { family: string; displayName: string; weightType: string } }>(
       "load_model",
       {
@@ -1456,7 +1464,7 @@ async function doLoadModel(): Promise<void> {
     if (result.success) {
       const info = result.modelInfo;
       const uiName = selectedModelUiName();
-      setText("#model-state", "Loaded");
+      setText("#model-state", t("Loaded"));
       el("#model-state").classList.add("ok");
       setText("#model-chip", `${uiName} (${info.weightType || "default"})`);
       el("#model-chip").classList.remove("muted");
@@ -1465,7 +1473,7 @@ async function doLoadModel(): Promise<void> {
       showToast(`Model loaded: ${uiName}`);
     }
   } catch (e) {
-    setText("#model-state", "Error");
+    setText("#model-state", t("Error"));
     showToast(`Failed to load model: ${e}`, "error");
   } finally {
     el<HTMLButtonElement>("#load-model-btn").disabled = false;
@@ -1475,9 +1483,9 @@ async function doLoadModel(): Promise<void> {
 async function doUnloadModel(): Promise<void> {
   try {
     await invoke("unload_model");
-    setText("#model-state", "Not loaded");
+    setText("#model-state", t("Not loaded"));
     el("#model-state").classList.remove("ok");
-    setText("#model-chip", "No model");
+    setText("#model-chip", t("No model"));
     el("#model-chip").classList.add("muted");
     el("#model-chip").classList.remove("active");
     el<HTMLButtonElement>("#unload-model-btn").disabled = true;
@@ -2499,7 +2507,7 @@ function renderSpeakerGalleryList(): void {
   if (speakerPersonas.length === 0) {
     const empty = document.createElement("div");
     empty.className = "speaker-gallery-empty";
-    empty.textContent = "No saved speakers yet";
+    empty.textContent = t("No saved speakers yet");
     list.appendChild(empty);
     return;
   }
@@ -2517,6 +2525,7 @@ function renderSpeakerGalleryList(): void {
     `;
     list.appendChild(item);
   }
+  translateStaticDom(list);
 }
 
 function renderSpeakerGalleryEditor(): void {
@@ -3032,6 +3041,7 @@ function renderMultiSpeakers(): void {
     list.appendChild(card);
   }
   refreshReferenceRecorderUi();
+  translateStaticDom(list);
 }
 
 function renderMultiLines(): void {
@@ -3748,7 +3758,7 @@ function renderQueuePanel(): void {
   if (generationQueue.length === 0 && externalJobs.length === 0) {
     const empty = document.createElement("div");
     empty.className = "queue-empty";
-    empty.textContent = "No queued generations";
+    empty.textContent = t("No queued generations");
     list.appendChild(empty);
   } else {
     generationQueue.forEach((job, index) => {
@@ -4913,13 +4923,13 @@ function initDownload(): void {
     title.textContent = kind === "whisper"
       ? "Download Whisper Model"
       : kind === "engine"
-        ? "Download Engine DLLs"
-        : "Download Model";
+        ? t("Download Engine DLLs")
+        : t("Download Model");
     urlInput.placeholder = kind === "whisper"
       ? "Paste whisper.cpp ggml .bin URL…"
       : kind === "engine"
-        ? "Engine package URL…"
-        : "Paste HuggingFace GGUF URL…";
+        ? t("Engine package URL…")
+        : t("Paste HuggingFace GGUF URL…");
     presetRow.classList.toggle("hidden", kind !== "model");
     if (kind === "whisper") {
       urlInput.value = whisperPresetUrl(whisperPreset);
@@ -5313,13 +5323,13 @@ async function initEventListeners(): Promise<void> {
   await listen<ModelStatusEvent>("model-status", (event) => {
     const status = event.payload;
     engineSupportsStreaming = Boolean(status.supportsStreaming);
-    setText("#engine-chip", status.engineLoaded ? "Engine loaded" : "Engine unloaded");
+    setText("#engine-chip", status.engineLoaded ? t("Engine loaded") : t("Engine unloaded"));
     el<HTMLElement>("#engine-chip").classList.toggle("active", status.engineLoaded);
 
     if (!status.modelLoaded) {
-      setText("#model-state", "Not loaded");
+      setText("#model-state", t("Not loaded"));
       el("#model-state").classList.remove("ok");
-      setText("#model-chip", "No model");
+      setText("#model-chip", t("No model"));
       el("#model-chip").classList.add("muted");
       el("#model-chip").classList.remove("active");
       el<HTMLButtonElement>("#unload-model-btn").disabled = true;
@@ -5328,7 +5338,7 @@ async function initEventListeners(): Promise<void> {
 
     if (status.displayName) {
       const uiName = selectedModelUiName();
-      setText("#model-state", "Loaded");
+      setText("#model-state", t("Loaded"));
       el("#model-state").classList.add("ok");
       setText("#model-chip", `${uiName} (${status.weightType || "default"})`);
       el("#model-chip").classList.remove("muted");
@@ -5478,6 +5488,9 @@ async function main(): Promise<void> {
 }
 
 document.addEventListener("contextmenu", (e) => e.preventDefault());
+
+document.documentElement.lang = getLang();
+translateStaticDom();
 
 if (new URLSearchParams(window.location.search).get("popout") === "api-command-centre") {
   void initApiCommandPopout();

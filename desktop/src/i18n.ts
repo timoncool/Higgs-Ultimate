@@ -1,0 +1,537 @@
+// English source strings to Russian. The window's English markup and strings stay as they are: translateStaticDom()
+// swaps known text nodes and the placeholder / title / aria-label / data-tip attributes, and t(en) translates strings
+// made in code (toasts, chips, statuses). Only exact known strings change, so code snippets and numbers are safe.
+// English is the default; switching the language reloads the window so the original markup comes back cleanly.
+
+export type Lang = "ru" | "en";
+
+export const LANG_STORAGE_KEY = "higgsAudio.lang";
+
+export function getLang(): Lang {
+  return localStorage.getItem(LANG_STORAGE_KEY) === "ru" ? "ru" : "en";
+}
+
+export function setLang(lang: Lang): void {
+  localStorage.setItem(LANG_STORAGE_KEY, lang);
+  window.location.reload();
+}
+
+// English source string → Russian.
+export const RU: Record<string, string> = {
+  // ── Topbar ──
+  "Neural TTS · Voice Cloning · Audio Continuation": "Нейросетевой TTS · Клонирование голоса · Продолжение аудио",
+  "API server status": "Статус API-сервера",
+  "API server stopped": "API-сервер остановлен",
+  "Show active download": "Показать активную загрузку",
+  "Settings": "Настройки",
+  "Engine unloaded": "Движок не загружен",
+  "Engine loaded": "Движок загружен",
+  "No model": "Нет модели",
+
+  // ── Model panel ──
+  "Model": "Модель",
+  "Not loaded": "Не загружено",
+  "Loaded": "Загружено",
+  "Loading…": "Загрузка…",
+  "Error": "Ошибка",
+  "Select a model…": "Выберите модель…",
+  "📁 Browse…": "📁 Обзор…",
+  "⬇ Download": "⬇ Скачать",
+  "Load Engine": "Загрузить движок",
+  "Load Model": "Загрузить модель",
+  "Unload": "Выгрузить",
+  "⬇ Download Engine DLLs": "⬇ Скачать DLL движка",
+
+  // ── Whisper panel ──
+  "Choose model": "Выбрать модель",
+  "Parakeet model": "Модель Parakeet",
+  "Selected folder": "Выбранная папка",
+  "Select the Parakeet model folder…": "Выберите папку модели Parakeet…",
+  "Select ggml-base.en.bin…": "Выберите файл ggml…",
+
+  // ── Hardware panel ──
+  "Hardware": "Оборудование",
+  "Poll": "Опрос",
+  "Hardware monitor polling interval.": "Интервал опроса монитора оборудования.",
+  "Collapse hardware": "Свернуть оборудование",
+  "Power": "Питание",
+  "Waiting for GPU data": "Ожидание данных GPU",
+
+  // ── Queue ──
+  "Queue Manager": "Очередь",
+  "Idle": "Простаивает",
+  "Clear": "Очистить",
+  "Nothing generating": "Ничего не генерируется",
+
+  // ── Mode tabs ──
+  "Voice Clone": "Клон голоса",
+  "Continue Speech": "Продолжить речь",
+  "Multi Speaker": "Мультиспикер",
+  "Speaker Gallery": "Галерея голосов",
+  "History": "История",
+
+  // ── TTS / Clone / Finish shared ──
+  "Text to speak": "Текст для озвучки",
+  "Type or paste text here…": "Введите или вставьте текст…",
+  "Saved speaker identity (optional)": "Сохранённый голос (необязательно)",
+  "Saved speaker identity": "Сохранённый голос",
+  "Optional. Pick one from Speaker Gallery, or ignore this and upload a one-off reference below.":
+    "Необязательно. Выберите голос из Галереи или загрузите разовый референс ниже.",
+  "Reference voice": "Референс-голос",
+  "Drop audio file or click to browse": "Перетащите аудио или нажмите для выбора",
+  "⤒ Drop audio file here, or click to browse": "⤒ Перетащите аудио сюда или нажмите для выбора",
+  "⤒ Drop reference voice here, or click to browse": "⤒ Перетащите референс-голос сюда или нажмите для выбора",
+  "⤒ Drop the clip to continue, or click to browse": "⤒ Перетащите клип для продолжения или нажмите для выбора",
+  "mp3 · wav · flac · m4a — auto-cropped to 30s": "mp3 · wav · flac · m4a — авто-обрезка до 30с",
+  "Play reference": "Воспроизвести референс",
+  "Play speaker reference": "Воспроизвести референс голоса",
+  "Normalize reference": "Нормализовать референс",
+  "Reference transcript (optional)": "Транскрипт референса (необязательно)",
+  "Reference transcript": "Транскрипт референса",
+  "✦ Auto-transcribe": "✦ Автотранскрипт",
+  "What the reference audio says…": "Что говорит референс-аудио…",
+  "What this reference voice says…": "Что говорит этот референс-голос…",
+  "ⓘ Improves cloning fidelity. Leave blank to skip. Only clone voices you have permission to use.":
+    "ⓘ Повышает точность клонирования. Можно оставить пустым. Клонируйте только голоса, на которые есть разрешение.",
+
+  // ── Speaker Gallery ──
+  "+ Speaker": "+ Голос",
+  "Download the standard Nerual Dreming voice pack and add all voices to the gallery":
+    "Скачать стандартный войспак Nerual Dreming и добавить все голоса в галерею",
+  "Standard voices": "Стандартные голоса",
+  "Import": "Импорт",
+  "Export": "Экспорт",
+  "Delete": "Удалить",
+  "Add or replace display picture": "Добавить или заменить фото",
+  "Speaker name": "Имя голоса",
+  "Remove photo": "Удалить фото",
+  "Drop speaker reference audio or click to browse": "Перетащите референс-аудио голоса или нажмите для выбора",
+  "Source / consent notes": "Источник / заметки о согласии",
+  "Where this reference came from, usage permission, character notes, etc.":
+    "Откуда взят референс, разрешение на использование, заметки о персонаже и т.п.",
+
+  // ── Continue Speech ──
+  "What should be spoken after the input audio…": "Что должно прозвучать после входного аудио…",
+  "ⓘ The text to generate after the input audio ends.": "ⓘ Текст, который будет сгенерирован после окончания входного аудио.",
+  "Optional. Use a saved speaker as the continuation source, or upload a one-off clip below.":
+    "Необязательно. Возьмите сохранённый голос как источник продолжения или загрузите разовый клип ниже.",
+  "Audio to continue": "Аудио для продолжения",
+  "Voice transcript": "Транскрипт голоса",
+  "What the input audio says — type it or use auto-transcribe":
+    "Что говорит входное аудио — впишите или используйте автотранскрипт",
+  "Include whole audio": "Включить всё аудио",
+  "ⓘ Transcript of the input audio. Improves continuation quality.":
+    "ⓘ Транскрипт входного аудио. Улучшает качество продолжения.",
+
+  // ── Multi Speaker ──
+  "Speakers": "Спикеры",
+  "Apply": "Применить",
+  "Import IDs": "Импорт ID",
+  "Export IDs": "Экспорт ID",
+  "Speech Lines": "Реплики",
+  "[Speaker1] First line\n[Speaker2] Reply line": "[Спикер1] Первая реплика\n[Спикер2] Ответная реплика",
+  "Import tagged script": "Импорт размеченного сценария",
+  "Clear lines": "Очистить реплики",
+  "+ Line": "+ Реплика",
+
+  // ── Advanced options ──
+  "▸ Advanced options": "▸ Расширенные настройки",
+  "Temperature": "Температура",
+  "Default: 1.00. Controls sampling randomness. Higher is more varied; lower is more stable and repeatable.":
+    "По умолчанию 1.00. Управляет случайностью сэмплирования. Больше — разнообразнее; меньше — стабильнее и воспроизводимее.",
+  "Default: 50. Samples from only the top K likely tokens. 0 usually disables this filter.":
+    "По умолчанию 50. Сэмплирует только из топ-K вероятных токенов. 0 обычно отключает фильтр.",
+  "Default: 0.95. Nucleus sampling. Lower values keep output closer to the most likely tokens.":
+    "По умолчанию 0.95. Nucleus-сэмплирование. Меньшие значения держат вывод ближе к самым вероятным токенам.",
+  "Seed": "Сид",
+  "Default: 0, Fixed. Controls repeatable randomness. Random changes every generation; increment and decrement step by 1 after each generation.":
+    "По умолчанию 0, Фикс. Управляет воспроизводимой случайностью. «Случайно» меняется каждый раз; инкремент/декремент шагают на 1 после каждой генерации.",
+  "Fixed": "Фикс.",
+  "Increment": "Инкремент",
+  "Decrement": "Декремент",
+  "Random": "Случайно",
+  "Randomize seed now": "Случайный сид сейчас",
+  "Emotion": "Эмоция",
+  "Default: None. Adds an optional emotion delivery tag when supported by the active Higgs backend/model.":
+    "По умолчанию Нет. Добавляет тег эмоции, если поддерживается активным движком/моделью.",
+  "None": "Нет",
+  "Elation": "Ликование",
+  "Amusement": "Веселье",
+  "Enthusiasm": "Энтузиазм",
+  "Determination": "Решимость",
+  "Pride": "Гордость",
+  "Contentment": "Удовлетворение",
+  "Affection": "Нежность",
+  "Relief": "Облегчение",
+  "Contemplation": "Задумчивость",
+  "Confusion": "Смятение",
+  "Surprise": "Удивление",
+  "Awe": "Трепет",
+  "Longing": "Тоска",
+  "Arousal": "Возбуждение",
+  "Anger": "Гнев",
+  "Fear": "Страх",
+  "Disgust": "Отвращение",
+  "Bitterness": "Горечь",
+  "Sadness": "Грусть",
+  "Shame": "Стыд",
+  "Helplessness": "Беспомощность",
+  "Style": "Стиль",
+  "Default: None. Adds an optional style tag such as singing, shouting, or whispering when supported.":
+    "По умолчанию Нет. Добавляет тег стиля (пение, крик, шёпот), если поддерживается.",
+  "Singing": "Пение",
+  "Shouting": "Крик",
+  "Whispering": "Шёпот",
+  "Speed": "Скорость",
+  "Default: None. Adds an optional speaking-speed tag. Use only when the backend/model supports it.":
+    "По умолчанию Нет. Добавляет тег скорости речи. Используйте, если движок/модель поддерживает.",
+  "Very slow": "Очень медленно",
+  "Slow": "Медленно",
+  "Fast": "Быстро",
+  "Very fast": "Очень быстро",
+  "Pitch": "Высота тона",
+  "Default: None. Adds an optional low/high pitch tag when supported by the backend/model.":
+    "По умолчанию Нет. Добавляет тег низкой/высокой тональности, если поддерживается.",
+  "Low": "Низкий",
+  "High": "Высокий",
+  "Expressiveness": "Выразительность",
+  "Default: None. Adds an optional high/low expressiveness tag when supported.":
+    "По умолчанию Нет. Добавляет тег высокой/низкой выразительности, если поддерживается.",
+  "Max tokens": "Макс. токенов",
+  "Default: 1024. Caps generated token count. Higher allows longer output but reserves more runtime KV/graph memory up front.":
+    "По умолчанию 1024. Ограничивает число токенов. Больше — длиннее вывод, но больше памяти KV/графа резервируется заранее.",
+  "Longform chunking": "Разбивка длинного текста",
+  "Default: Off. Splits long text into smaller generations and joins the results. Useful for long passages.":
+    "По умолчанию Выкл. Делит длинный текст на части и склеивает результаты. Полезно для длинных фрагментов.",
+  "Chunk size": "Размер фрагмента",
+  "Default: 45. Approximate text chunk size used only when longform chunking is enabled.":
+    "По умолчанию 45. Примерный размер фрагмента текста, применяется только при включённой разбивке.",
+  "Pause (sec)": "Пауза (сек)",
+  "Default: 0.15 sec. Adds silence between chunks when longform chunking is enabled.":
+    "По умолчанию 0.15 сек. Добавляет тишину между фрагментами при включённой разбивке.",
+  "Speaker pause": "Пауза между спикерами",
+  "Default: 0.15 sec. Multi Speaker only. Adds silence between generated speaker lines after they are stitched together.":
+    "По умолчанию 0.15 сек. Только для мультиспикера. Добавляет тишину между репликами спикеров при склейке.",
+
+  // ── API panel ──
+  "Local API": "Локальный API",
+  "Stopped": "Остановлен",
+  "Running": "Работает",
+  "API Info": "О API",
+  "Start": "Старт",
+  "Stop": "Стоп",
+  "Host": "Хост",
+  "Port": "Порт",
+  "API key": "Ключ API",
+  "Base URL": "Базовый URL",
+  "Show API key": "Показать ключ API",
+  "Generate key": "Сгенерировать ключ",
+  "Copy base URL": "Копировать базовый URL",
+  "Copy key": "Копировать ключ",
+  "Copy curl": "Копировать curl",
+  "Copy example": "Копировать пример",
+  "Endpoints": "Эндпоинты",
+  "Request Options": "Параметры запроса",
+  "Command Centre": "Командный центр",
+  "Pop out": "Открепить",
+  "Copy": "Копировать",
+  "All": "Все",
+  "Info": "Инфо",
+  "Warnings": "Предупреждения",
+  "Errors": "Ошибки",
+  "Requests": "Запросы",
+  "Jobs": "Задачи",
+  "Examples use the current Base URL and API key.": "Примеры используют текущий базовый URL и ключ API.",
+
+  // ── History ──
+  "Generation History": "История генераций",
+  "Clear All": "Очистить всё",
+  "No generations yet": "Пока нет генераций",
+
+  // ── Generate / Output ──
+  "▶ Generate": "▶ Генерировать",
+  "⇉ Batch": "⇉ Пакет",
+  "Batch: generate each line of text as a separate clip (Text to Speech and Voice Clone)":
+    "Пакет: каждая строка текста генерируется как отдельный клип (TTS и Клон голоса)",
+  "Add to Queue": "В очередь",
+  "⏹ Cancel": "⏹ Отмена",
+  "Output": "Результат",
+  "Save audio": "Сохранить аудио",
+  "Volume": "Громкость",
+
+  // ── Settings popover ──
+  "Theme": "Тема",
+  "Dark": "Тёмная",
+  "Light": "Светлая",
+  "Accent": "Акцент",
+  "Accent color": "Цвет акцента",
+  "UI scale": "Масштаб интерфейса",
+  "Language": "Язык",
+  "Close settings": "Закрыть настройки",
+  "Stream playback during generation": "Потоковое воспроизведение при генерации",
+  "Requires a streaming-capable Higgs engine DLL. The current offline engine falls back to normal generation.":
+    "Требуется потоковый DLL движка Higgs. Текущий офлайн-движок откатывается к обычной генерации.",
+  "Minimize to tray on close": "Сворачивать в трей при закрытии",
+  "Keeps the API and loaded model running in the background. Click the tray icon to restore.":
+    "Оставляет API и загруженную модель работать в фоне. Клик по иконке в трее — восстановить.",
+  "Quit app": "Выйти",
+
+  // ── Download popover ──
+  "Download Model": "Скачать модель",
+  "Download Parakeet Model": "Скачать модель Parakeet",
+  "Download Engine DLLs": "Скачать DLL движка",
+  "Close": "Закрыть",
+  "Model file": "Файл модели",
+  "Paste HuggingFace GGUF URL…": "Вставьте ссылку на GGUF с HuggingFace…",
+  "Parakeet ONNX model repo…": "Репозиторий ONNX-модели Parakeet…",
+  "Engine package URL…": "URL пакета движка…",
+  "Fetch": "Скачать",
+  "Pause": "Пауза",
+  "Resume": "Продолжить",
+
+  // ── Speaker export modal ──
+  "Export Speakers": "Экспорт голосов",
+  "Select all": "Выбрать все",
+  "Select none": "Снять выбор",
+  "Cancel": "Отмена",
+  "Export selected": "Экспорт выбранных",
+
+  // ── First run wizard (dynamic) ──
+  "Loaded and ready": "Загружено и готово",
+  "Found:": "Найдено:",
+  "Selected:": "Выбрано:",
+  "Not found. Download the engine package or browse to audiocpp_engine.dll.":
+    "Не найдено. Скачайте пакет движка или укажите файл audiocpp_engine.dll.",
+  "Saved engine path not found:": "Сохранённый путь движка не найден:",
+  "No Higgs model folder found. Download a model folder or browse to one.":
+    "Папка модели Higgs не найдена. Скачайте модель или укажите папку вручную.",
+  "Optional. Download only if you want auto-transcription.":
+    "Необязательно. Скачайте, только если нужен авто-транскрипт.",
+  "Core setup found. You can load anything not already loaded, or close this wizard.":
+    "Основные файлы на месте. Загрузите то, что ещё не загружено, или закройте мастер.",
+  "Some core setup files are missing. Use Browse if you already have them, or Download to fetch them.":
+    "Не хватает основных файлов. Нажмите «Обзор», если они у вас уже есть, или «Скачать».",
+
+  // ── First run wizard ──
+  "First Run Setup": "Первый запуск",
+  "Engine, model, then generate": "Движок, модель, затем генерация",
+  "Checking local engine and model files...": "Проверка локальных файлов движка и модели…",
+  "Engine DLLs": "DLL движка",
+  "Checking engine package...": "Проверка пакета движка…",
+  "Browse": "Обзор",
+  "Download": "Скачать",
+  "Load": "Загрузить",
+  // ── System libraries block ──
+  // ("VC++ runtime"/"NVIDIA driver" уже есть в секции Engine diagnostics ниже —
+  //  не дублируем, TS запрещает повторные ключи в литерале.)
+  "System libraries": "Системные библиотеки",
+  "Core files": "Основные файлы",
+  "CUDA runtime": "CUDA runtime",
+  "Checking CUDA runtime DLLs...": "Проверка CUDA runtime DLL…",
+  "Checking Visual C++ runtime DLLs...": "Проверка VC++ runtime DLL…",
+  "Checking NVIDIA driver...": "Проверка драйвера NVIDIA…",
+  "Open nvidia.com/drivers": "Открыть nvidia.com/drivers",
+  "Higgs model folder": "Папка модели Higgs",
+  "Checking downloaded model folders...": "Проверка скачанных папок моделей…",
+  "Parakeet auto-transcribe": "Автотранскрипт Parakeet",
+  "Optional. Needed only for auto reference transcripts.": "Необязательно. Нужно только для авто-транскриптов референса.",
+  "Refresh": "Обновить",
+  "Open Studio": "Открыть студию",
+
+  // ── Engine diagnostics ──
+  "Engine Dependency Check": "Проверка зависимостей движка",
+  "Windows loader preflight": "Предпроверка загрузчика Windows",
+  "Missing required DLLs": "Отсутствуют нужные DLL",
+  "Detected DLLs": "Найденные DLL",
+  "Search paths checked": "Проверенные пути поиска",
+  "Copy diagnostics": "Копировать диагностику",
+  "NVIDIA driver": "Драйвер NVIDIA",
+  "VC++ runtime": "VC++ рантайм",
+  "Download CUDA runtime": "Скачать CUDA runtime",
+  "Download VC++ runtime": "Скачать VC++ runtime",
+
+  // ── Toasts / statuses (dynamic) ──
+  "A download is already running. Use Pause, Resume, or Stop.": "Загрузка уже идёт. Используйте Паузу, Продолжить или Стоп.",
+  "Batch works in the Text to Speech and Voice Clone tabs": "Пакетный режим работает во вкладках TTS и Клон голоса",
+  "Choose at least one speaker to export": "Выберите хотя бы один голос для экспорта",
+  "Could not play that audio file": "Не удалось воспроизвести аудиофайл",
+  "Could not prepare audio preview": "Не удалось подготовить превью аудио",
+  "Create a speaker first": "Сначала создайте голос",
+  "Download stopped": "Загрузка остановлена",
+  "Downloading standard voice pack…": "Скачиваю стандартный войспак…",
+  "Drop a reference voice before saving this identity": "Добавьте референс-голос перед сохранением",
+  "Drop a reference voice first": "Сначала добавьте референс-голос",
+  "Drop an audio file first": "Сначала добавьте аудиофайл",
+  "Engine dependency missing. Opened repair details.": "Не хватает зависимости движка. Открыл детали для починки.",
+  "History cleared": "История очищена",
+  "Loaded queued item for editing": "Элемент очереди загружен для редактирования",
+  "Model unloaded": "Модель выгружена",
+  "No saved speakers to export": "Нет сохранённых голосов для экспорта",
+  "Please enter text to speak (one clip per line)": "Введите текст (одна строка = один клип)",
+  "Queue cleared": "Очередь очищена",
+  "Queued item deleted": "Элемент очереди удалён",
+  "Select a model first": "Сначала выберите модель",
+  "Select a saved speaker identity first": "Сначала выберите сохранённый голос",
+  "Select a speaker identity to delete": "Выберите голос для удаления",
+  "Download the Parakeet model in Settings first": "Сначала скачайте модель Parakeet в настройках",
+  "Speaker identity deleted": "Голос удалён",
+  "Streaming needs an updated Higgs engine DLL; current DLL falls back to normal generation.":
+    "Для стриминга нужен обновлённый DLL движка; текущий откатывается к обычной генерации.",
+  "That speaker identity has no reference audio": "У этого голоса нет референс-аудио",
+  "Use lines like [Speaker1] text to import a script": "Используйте строки вида [Speaker1] текст для импорта сценария",
+  "Parakeet model downloaded": "Модель Parakeet скачана",
+  "🎤 Record voice": "🎤 Записать голос",
+  "or record your own voice with the microphone": "или запишите свой голос с микрофона",
+  "Record voice": "Записать голос",
+  "Standard voices already imported": "Стандартные голоса уже добавлены",
+  "Loading engine…": "Загружаю движок…",
+  "Loading model…": "Загружаю модель…",
+  "Download the engine first — opening downloader": "Сначала скачайте движок — открываю загрузчик",
+  "Download a model first — opening downloader": "Сначала скачайте модель — открываю загрузчик",
+
+  // ── Dynamically rendered cards (multi-speaker, gallery, queue) ──
+  "No saved speakers yet": "Пока нет сохранённых голосов",
+  "No reference audio": "Нет референс-аудио",
+  "No queued generations": "Очередь пуста",
+  "Nothing detected yet": "Пока ничего не найдено",
+  "Edit": "Править",
+  "API request": "API-запрос",
+  "Use saved identity…": "Выбрать сохранённый голос…",
+  "Select saved identity…": "Выбрать сохранённый голос…",
+  "Drop reference voice, or click to browse": "Перетащите референс-голос или нажмите для выбора",
+  "Optional line-specific reference voice": "Необязательный референс для этой реплики",
+  "Optional. Auto-filled with Parakeet when available.": "Необязательно. Автозаполнение через Parakeet, если доступно.",
+  "Optional notes for this identity": "Необязательные заметки об этом голосе",
+  "Collapse speaker": "Свернуть спикера",
+  "Expand speaker": "Развернуть спикера",
+  "Drag line": "Перетащить реплику",
+  "Hide reference": "Скрыть референс",
+  "Reference": "Референс",
+  "Text to speak for this line...": "Текст этой реплики…",
+  "Reference transcript override": "Переопределение транскрипта",
+  "Leave blank to use the selected speaker transcript.": "Оставьте пустым — возьмётся транскрипт выбранного спикера.",
+
+  // ── Batch tab ──
+  "Batch": "Пакет",
+  "Batch generation": "Пакетная генерация",
+  "Generate many clips at once. One line = one clip, or load .txt files.":
+    "Генерируйте много клипов сразу. Одна строка = один клип, либо загрузите .txt файлы.",
+  "Voice": "Голос",
+  "Empty = base voice. Pick a saved identity to clone it for every clip.":
+    "Пусто = базовый голос. Выберите сохранённый голос, чтобы клонировать его для всех клипов.",
+  "List of phrases (one per line)": "Список фраз (по одной в строке)",
+  "Load .txt files…": "Загрузить .txt файлы…",
+  "Each line = a clip": "Каждая строка = клип",
+  "Clear files": "Очистить файлы",
+  "▶ Generate batch": "▶ Сгенерировать пакет",
+  "⏹ Stop": "⏹ Стоп",
+  "First phrase.\nSecond phrase.\nThird phrase.": "Первая фраза.\nВторая фраза.\nТретья фраза.",
+  "From files:": "Из файлов:",
+  "Base voice (no cloning)": "Базовый голос (без клонирования)",
+  "Clips loaded from files:": "Клипов загружено из файлов:",
+  "Could not read files": "Не удалось прочитать файлы",
+  "Generating": "Генерация",
+  "Saved": "Сохранено",
+  "Save": "Сохранить",
+  "Failed": "Ошибка",
+  "Done": "Готово",
+  "saved": "сохр.",
+
+  // ── Transcript & Diarization tab ──
+  "Transcript & Diarization": "Транскрипт и диаризация",
+  "Drop an audio or video file, or record from the microphone. Speech is transcribed with word timing; multiple voices are split into speakers.":
+    "Перетащите аудио или видео, либо запишите с микрофона. Речь транскрибируется с таймингом по словам; несколько голосов разбиваются по спикерам.",
+  "Drop audio or video here": "Перетащите аудио или видео сюда",
+  "wav · mp3 · flac · m4a · ogg · mp4 (video audio track)":
+    "wav · mp3 · flac · m4a · ogg · mp4 (аудиодорожка видео)",
+  "Choose file…": "Выбрать файл…",
+  "● Record": "● Запись",
+  "Detect speakers (diarization)": "Определять спикеров (диаризация)",
+  "⬇ Download diarization model (~470 MB)": "⬇ Скачать модель диаризации (~470 МБ)",
+  "▶ Transcribe": "▶ Транскрибировать",
+  "Export .txt": "Экспорт .txt",
+  "Export .srt": "Экспорт .srt",
+  "Diarization model ready.": "Модель диаризации готова.",
+  "Diarization model not downloaded — single-speaker transcription only.":
+    "Модель диаризации не скачана — только односпикерная транскрипция.",
+  "Downloading diarization model…": "Скачивание модели диаризации…",
+  "Diarization model downloaded.": "Модель диаризации скачана.",
+  "Model download failed": "Не удалось скачать модель",
+  // ── Очистка голоса (вокал-сепарация) ──
+  "Clean voice (remove background)": "Очистка голоса (убрать фон)",
+  "⬇ Download voice-cleaning model (~415 MB)": "⬇ Скачать модель очистки голоса (~415 МБ)",
+  "Voice-cleaning model ready.": "Модель очистки голоса готова.",
+  "Voice-cleaning engine not downloaded — references used as-is.":
+    "Движок очистки голоса не скачан — референсы используются как есть.",
+  "Downloading voice-cleaning model…": "Скачивание модели очистки голоса…",
+  "Voice-cleaning model downloaded.": "Модель очистки голоса скачана.",
+  "Cleaning voice…": "Очистка голоса…",
+  "Voice cleaning failed, using reference as-is": "Очистка не удалась, референс без изменений",
+  "No ASR model set. Download the Parakeet model in Settings.":
+    "Не выбрана ASR-модель. Скачайте Parakeet в настройках.",
+  "Choose an audio or video file first.": "Сначала выберите аудио или видео.",
+  "Decoding…": "Декодирование…",
+  "Diarizing…": "Диаризация…",
+  "Transcribing…": "Транскрипция…",
+  "Transcription failed": "Ошибка транскрипции",
+  "No speech found.": "Речь не найдена.",
+  "Speaker": "Спикер",
+  "speakers": "спикеров",
+  "1 speaker": "1 спикер",
+  "Play segment": "Воспроизвести сегмент",
+  "Rename speaker": "Переименовать спикера",
+  "Make voice": "Сделать голос",
+  "Building voice…": "Собираем голос…",
+  "Voice added to gallery": "Голос добавлен в галерею",
+  "A speaker with this name already exists": "Голос с таким именем уже существует",
+  "Could not build voice": "Не удалось собрать голос",
+  "Nothing to export yet.": "Пока нечего экспортировать.",
+  "Exported": "Экспортировано",
+  "Export failed": "Ошибка экспорта",
+  "Recording…": "Запись…",
+  "video": "видео",
+  "Video has no decodable audio track, or the container is unsupported (try mp4).":
+    "В видео нет декодируемой аудиодорожки, либо контейнер не поддерживается (попробуйте mp4).",
+};
+
+// Translate a dynamic string. Returns Russian when in RU mode and known,
+// otherwise the original English (safe fallback).
+export function t(en: string): string {
+  if (getLang() !== "ru") return en;
+  return RU[en] ?? en;
+}
+
+const ATTR_TO_TRANSLATE = ["placeholder", "title", "aria-label", "data-tip"];
+
+// Walk the DOM once and swap known English strings for Russian.
+export function translateStaticDom(root: ParentNode = document.body): void {
+  if (getLang() !== "ru") return;
+
+  // Text nodes.
+  const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let node = walker.nextNode();
+  while (node) {
+    nodes.push(node as Text);
+    node = walker.nextNode();
+  }
+  for (const textNode of nodes) {
+    const raw = textNode.nodeValue;
+    if (!raw) continue;
+    const key = raw.trim();
+    if (!key) continue;
+    const translated = RU[key];
+    if (translated) textNode.nodeValue = raw.replace(key, translated);
+  }
+
+  // Attributes.
+  const elements = (root as ParentNode).querySelectorAll<HTMLElement>("*");
+  for (const el of elements) {
+    for (const attr of ATTR_TO_TRANSLATE) {
+      const value = el.getAttribute(attr);
+      if (!value) continue;
+      const translated = RU[value.trim()];
+      if (translated) el.setAttribute(attr, translated);
+    }
+  }
+}
