@@ -3,6 +3,7 @@ mod download;
 mod engine;
 mod recorder;
 mod storage;
+mod voiceclean;
 
 use engine::{
     AudioChunkCallback, AudioResult, Engine, EngineError, GenerateRequest, LoadModelRequest,
@@ -3403,20 +3404,51 @@ async fn audio_waveform(
     Ok(serde_json::json!({ "peaks": peaks }))
 }
 
+/// `clean_voice`: separate the vocals first when the cleaning engine and model are downloaded. A cleaning that fails
+/// is reported by a `voiceclean-progress` error event and the reference is used as it is.
 #[tauri::command]
 async fn prepare_reference_upload(
+    app: AppHandle,
     audio_path: String,
     max_seconds: Option<f64>,
+    clean_voice: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let max_seconds = max_seconds
         .filter(|seconds| *seconds > 0.0)
         .unwrap_or(REFERENCE_MAX_SECONDS);
+    let mut cleaned_stem = None;
+    let source_path = if clean_voice.unwrap_or(false) && voiceclean::is_installed() {
+        let _ = app.emit("voiceclean-progress", serde_json::json!({ "phase": "cleaning" }));
+        let source = audio_path.clone();
+        let cleaned = tauri::async_runtime::spawn_blocking(move || {
+            let wav = audio::ensure_wav(&source).map_err(|e| e.to_string())?;
+            voiceclean::clean_voice(&wav)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?;
+        match cleaned {
+            Ok(stem) => {
+                let _ = app.emit("voiceclean-progress", serde_json::json!({ "phase": "done" }));
+                cleaned_stem = Some(stem.clone());
+                stem
+            }
+            Err(message) => {
+                let _ = app.emit("voiceclean-progress", serde_json::json!({ "phase": "error", "message": message }));
+                audio_path.clone()
+            }
+        }
+    } else {
+        audio_path.clone()
+    };
     let prepared = tauri::async_runtime::spawn_blocking(move || {
-        audio::prepare_reference_wav(&audio_path, false, 0.95, Some(max_seconds))
+        audio::prepare_reference_wav(&source_path, false, 0.95, Some(max_seconds))
     })
     .await
     .map_err(|e| format!("task join error: {e}"))?
     .map_err(|e| e.to_string())?;
+    if let Some(stem) = cleaned_stem {
+        let _ = std::fs::remove_file(stem);
+    }
     let file_name = PathBuf::from(&prepared.path)
         .file_name()
         .and_then(|name| name.to_str())
@@ -3428,6 +3460,75 @@ async fn prepare_reference_upload(
         "durationSeconds": prepared.duration_seconds,
         "cropped": prepared.cropped,
     }))
+}
+
+#[tauri::command]
+fn voiceclean_status() -> serde_json::Value {
+    serde_json::json!({
+        "installed": voiceclean::is_installed(),
+        "engineInstalled": voiceclean::engine_cli_path().is_some(),
+        "modelInstalled": voiceclean::model_path().exists(),
+    })
+}
+
+/// Downloads the voice-cleaning engine (unpacked into resources/bsroformer) and model (models/bsroformer), with the
+/// usual `download-progress` events.
+#[tauri::command]
+async fn download_voiceclean(app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let control = state.download_control.clone();
+    if voiceclean::engine_cli_path().is_none() {
+        let engine_dir = voiceclean::engine_dir();
+        std::fs::create_dir_all(&engine_dir).map_err(|e| e.to_string())?;
+        let temp_dir = storage::temp_dir();
+        let (app_dl, control_dl) = (app.clone(), control.clone());
+        let archive = tauri::async_runtime::spawn_blocking(move || {
+            download::download_file(voiceclean::ENGINE_ZIP_URL, &temp_dir, Some("bsroformer-engine.zip"), &app_dl, control_dl)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+        let archive_path = PathBuf::from(&archive.path);
+        let unpacked = tauri::async_runtime::spawn_blocking(move || unpack_flat_zip(&archive_path, &engine_dir))
+            .await
+            .map_err(|e| format!("task join error: {e}"))?;
+        let _ = std::fs::remove_file(&archive.path);
+        unpacked?;
+    }
+    if !voiceclean::model_path().exists() {
+        let dest_dir = voiceclean::model_dir();
+        tauri::async_runtime::spawn_blocking(move || {
+            download::download_file(voiceclean::MODEL_URL, &dest_dir, Some(voiceclean::MODEL_FILE), &app, control)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(serde_json::json!({ "installed": voiceclean::is_installed() }))
+}
+
+/// Unpacks every file of a zip into `dest_dir` by its file name (the engine archive is flat).
+fn unpack_flat_zip(zip_path: &Path, dest_dir: &Path) -> Result<(), String> {
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("Could not open the engine archive: {e}"))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("The engine archive is not a zip: {e}"))?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(|e| format!("Could not read the engine archive: {e}"))?;
+        if entry.is_dir() {
+            continue;
+        }
+        let name = entry.name().replace('\\', "/");
+        let leaf = name.rsplit('/').next().unwrap_or(&name).to_string();
+        if leaf.is_empty() {
+            continue;
+        }
+        let out = dest_dir.join(&leaf);
+        let partial = out.with_extension("part");
+        {
+            let mut target = std::fs::File::create(&partial).map_err(|e| format!("Could not create {}: {e}", partial.display()))?;
+            std::io::copy(&mut entry, &mut target).map_err(|e| format!("Could not unpack {leaf}: {e}"))?;
+        }
+        std::fs::rename(&partial, &out).map_err(|e| format!("Could not finish {leaf}: {e}"))?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -3844,6 +3945,8 @@ pub fn run() {
             export_speaker_zip,
             import_speaker_zip,
             prepare_reference_upload,
+            voiceclean_status,
+            download_voiceclean,
             trim_reference_audio,
             audio_waveform,
             read_audio_as_wav,

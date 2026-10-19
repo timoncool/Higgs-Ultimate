@@ -122,6 +122,7 @@ let isGenerating = false;
 let cloneRefPath: string | null = null;
 let finishRefPath: string | null = null;
 let clonePersonaId = "";
+let voiceCleanEnabled = localStorage.getItem("higgsAudio.voiceClean") === "true";
 let finishPersonaId = "";
 let cloneRefName = "";
 let finishRefName = "";
@@ -2262,6 +2263,7 @@ async function prepareReferenceAudioFile(path: string, name?: string): Promise<{
   const result = await invoke<PreparedReferenceUpload>("prepare_reference_upload", {
     audioPath: path,
     maxSeconds: HIGGS_REFERENCE_MAX_SECONDS,
+    cleanVoice: voiceCleanEnabled,
   });
   if (result.cropped) {
     showToast(`Reference cropped to first ${HIGGS_REFERENCE_MAX_SECONDS} seconds`, "warning");
@@ -5309,7 +5311,46 @@ function initHardwareCollapse(): void {
 // Event listeners (Tauri events from backend)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Voice cleaning: the toggle, the status line and the download of the engine and model.
+async function refreshVoiceCleanNote(): Promise<void> {
+  const status = await invoke<{ installed: boolean }>("voiceclean_status");
+  setText("#clone-voiceclean-note", status.installed ? "Voice cleaning ready." : "Voice-cleaning engine not downloaded: references are used as they are.");
+  el<HTMLButtonElement>("#clone-download-voiceclean").classList.toggle("hidden", status.installed);
+}
+
+async function downloadVoiceClean(): Promise<void> {
+  const button = el<HTMLButtonElement>("#clone-download-voiceclean");
+  button.disabled = true;
+  showToast("Downloading the voice-cleaning engine and model...");
+  try {
+    await invoke("download_voiceclean");
+    showToast("Voice cleaning downloaded");
+    await refreshVoiceCleanNote();
+  } catch (error) {
+    showToast(`Voice-cleaning download failed: ${error}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function initVoiceClean(): void {
+  const toggle = el<HTMLInputElement>("#clone-voiceclean");
+  toggle.checked = voiceCleanEnabled;
+  toggle.addEventListener("change", () => {
+    voiceCleanEnabled = toggle.checked;
+    localStorage.setItem("higgsAudio.voiceClean", voiceCleanEnabled ? "true" : "false");
+  });
+  el("#clone-download-voiceclean").addEventListener("click", () => void downloadVoiceClean());
+  void refreshVoiceCleanNote();
+}
+
 async function initEventListeners(): Promise<void> {
+  initVoiceClean();
+  await listen<{ phase: string; message?: string }>("voiceclean-progress", (event) => {
+    const { phase, message } = event.payload;
+    if (phase === "cleaning") showToast("Cleaning voice...");
+    else if (phase === "error") showToast(`Voice cleaning failed, the reference is used as it is: ${message ?? ""}`, "warning");
+  });
   await listen<ModelStatusEvent>("model-status", (event) => {
     const status = event.payload;
     engineSupportsStreaming = Boolean(status.supportsStreaming);
