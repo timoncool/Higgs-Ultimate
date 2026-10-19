@@ -3645,6 +3645,14 @@ fn hardware_snapshot(state: State<'_, AppState>) -> HardwareSnapshot {
 // base64 helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// Level-match a generated WAV clip to a target integrated loudness (LUFS).
+#[tauri::command]
+fn normalize_wav(wav_base64: String, target_lufs: Option<f64>) -> Result<String, String> {
+    let bytes = base64_decode(&wav_base64).map_err(|e| e.to_string())?;
+    let out = audio::normalize_wav_bytes(&bytes, target_lufs.unwrap_or(-20.0))?;
+    Ok(base64_encode(&out))
+}
+
 fn base64_encode(data: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
@@ -3847,6 +3855,7 @@ pub fn run() {
             trim_reference_audio,
             audio_waveform,
             read_audio_as_wav,
+            normalize_wav,
             storage_layout,
             recorder::list_microphone_devices,
             recorder::start_reference_recording,

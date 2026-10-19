@@ -4067,6 +4067,13 @@ async function resolveMultiLineReference(
   };
 }
 
+// Level-match a clip to a common loudness (EBU R128, -20 LUFS by default) so segments built from references of
+// different volume sound consistent when joined.
+async function normalizeResultLoudness(result: GenerationResult, targetLufs = -20): Promise<GenerationResult> {
+  const wavBase64 = await invoke<string>("normalize_wav", { wavBase64: result.wavBase64, targetLufs });
+  return { ...result, wavBase64 };
+}
+
 async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "multi"; speakers: MultiSpeaker[]; lines: MultiLine[] } }): Promise<GenerationResult> {
   const options = job.options;
   const lines = job.payload.lines;
@@ -4099,7 +4106,8 @@ async function generateMultiSpeakerJob(job: GenerationJob & { payload: { kind: "
     outputs.push(result);
     setProgress("#gen-progress-bar", i + 1, lines.length);
   }
-  return concatenateWavResults(outputs, speakerPause);
+  const leveled = await Promise.all(outputs.map((output) => normalizeResultLoudness(output)));
+  return concatenateWavResults(leveled, speakerPause);
 }
 
 async function generateJobAudio(job: GenerationJob): Promise<GenerationResult> {
@@ -4147,7 +4155,8 @@ async function generateJobAudio(job: GenerationJob): Promise<GenerationResult> {
         audioPath: payload.refPath,
         targetSampleRate: result.sampleRate,
       });
-      result = concatenateWavResults([source, result]);
+      const [leveledSource, leveledResult] = await Promise.all([normalizeResultLoudness(source), normalizeResultLoudness(result)]);
+      result = concatenateWavResults([leveledSource, leveledResult]);
     }
     return result;
   }
