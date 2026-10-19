@@ -230,6 +230,7 @@ fn run_recording(
     app: AppHandle,
     session_id: String,
     requested_device: Option<String>,
+    max_seconds: u32,
     stop_rx: Receiver<()>,
     ready_tx: std::sync::mpsc::Sender<Result<RecordingStarted, String>>,
     done_tx: std::sync::mpsc::Sender<Result<RecordingResult, String>>,
@@ -251,7 +252,7 @@ fn run_recording(
     let sample_format = supported.sample_format();
     let config: cpal::StreamConfig = supported.into();
     let sample_rate = config.sample_rate.0;
-    let max_frames = u64::from(sample_rate) * u64::from(MAX_RECORDING_SECONDS);
+    let max_frames = if max_seconds == 0 { u64::MAX } else { u64::from(sample_rate) * u64::from(max_seconds) };
     let path = unique_recording_path();
     let spec = hound::WavSpec {
         channels: 1,
@@ -324,7 +325,7 @@ fn run_recording(
         session_id: session_id.clone(),
         device_name: device_name.clone(),
         sample_rate,
-        max_seconds: MAX_RECORDING_SECONDS,
+        max_seconds,
     };
     if ready_tx.send(Ok(started)).is_err() {
         return;
@@ -409,6 +410,7 @@ fn run_recording(
 fn start_recording_blocking(
     app: AppHandle,
     device_name: Option<String>,
+    max_seconds: u32,
 ) -> Result<RecordingStarted, String> {
     let mut guard = active_recording()
         .lock()
@@ -427,7 +429,7 @@ fn start_recording_blocking(
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let thread_session = session_id.clone();
     std::thread::spawn(move || {
-        run_recording(app, thread_session, device_name, stop_rx, ready_tx, done_tx);
+        run_recording(app, thread_session, device_name, max_seconds, stop_rx, ready_tx, done_tx);
     });
 
     let started = match ready_rx.recv_timeout(Duration::from_secs(8)) {
@@ -477,8 +479,11 @@ pub async fn list_microphone_devices() -> Result<Vec<MicrophoneDevice>, String> 
 pub async fn start_reference_recording(
     app: AppHandle,
     device_name: Option<String>,
+    max_seconds: Option<u32>,
 ) -> Result<RecordingStarted, String> {
-    tauri::async_runtime::spawn_blocking(move || start_recording_blocking(app, device_name))
+    // a reference stops at MAX_RECORDING_SECONDS; 0 records until stopped (a recording to transcribe)
+    let max_seconds = max_seconds.unwrap_or(MAX_RECORDING_SECONDS);
+    tauri::async_runtime::spawn_blocking(move || start_recording_blocking(app, device_name, max_seconds))
         .await
         .map_err(|error| format!("Microphone start task failed: {error}"))?
 }
