@@ -37,6 +37,7 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dy
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 shine-rs = "0.1.3"
+audiopus = "0.2.0"
 symphonia = { version = "0.5", features = ["mp3", "wav", "flac", "ogg", "aac", "isomp4"] }
 sysinfo = "0.32"
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }

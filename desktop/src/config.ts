@@ -1,9 +1,7 @@
 import type { TtsModelPreset, WhisperModelPreset } from "./types";
-import pkg from "../package.json";
+import packageMetadata from "../package.json";
 
-// Версия берётся из package.json (единый источник с tauri.conf/Cargo.toml через бамп релиза) —
-// хардкод здесь уже дал релиз 0.4.0 с надписью v0.3.1 в футере.
-export const APP_VERSION: string = pkg.version;
+export const APP_VERSION: string = packageMetadata.version;
 // Original author (engine + upstream app) — credit preserved in the UI footer.
 export const GITHUB_URL = "https://github.com/Saganaki22/Higgs-Audio-v3-Studio";
 // This Russian portable fork.
@@ -31,6 +29,7 @@ export const SPEAKER_PERSONA_STORAGE_KEY = "higgsAudio.speakerPersonas";
 export const MODEL_PATH_STORAGE_KEY = "higgsAudio.selectedModelPath";
 export const ENGINE_PATH_STORAGE_KEY = "higgsAudio.selectedEnginePath";
 export const MINIMIZE_TO_TRAY_STORAGE_KEY = "higgsAudio.minimizeToTray";
+export const MICROPHONE_DEVICE_STORAGE_KEY = "higgsAudio.microphoneDevice";
 export const STREAM_PLAYBACK_STORAGE_KEY = "higgsAudio.streamPlayback";
 export const API_LOG_STORAGE_KEY = "higgsAudio.apiLogs";
 export const API_COMMAND_POPOUT_LABEL = "api-command-centre";

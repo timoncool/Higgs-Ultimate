@@ -7,6 +7,7 @@ mod engine;
 pub mod envdeps;
 pub mod parakeet;
 mod recorder;
+mod storage;
 // pub: чтобы headless-пример voiceclean_test мог дергать clean_voice напрямую.
 pub mod voiceclean;
 
@@ -208,50 +209,6 @@ fn engine_package_base_url(url: &str) -> String {
             .unwrap_or_else(|| trimmed.to_string());
     }
     trimmed.to_string()
-}
-
-/// Portable data root: the directory that contains the executable. Everything
-/// the app writes (models, speakers, engine, whisper, webview state) lives here
-/// so the whole folder can be moved or deleted without leaving anything behind
-/// in the user profile. Replaces the old `~/audiocpp` layout.
-pub(crate) fn app_root_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-fn default_engine_download_dir() -> PathBuf {
-    app_root_dir().join("resources").join("engine")
-}
-
-pub(crate) fn user_models_root() -> PathBuf {
-    app_root_dir().join("models")
-}
-
-fn resolve_download_dest_dir(dest_dir: &str) -> PathBuf {
-    let path = PathBuf::from(dest_dir);
-    if path.is_absolute() {
-        return path;
-    }
-
-    let starts_with_models = path
-        .components()
-        .next()
-        .and_then(|component| match component {
-            std::path::Component::Normal(value) => Some(value.to_string_lossy()),
-            _ => None,
-        })
-        .map(|value| value.eq_ignore_ascii_case("models"))
-        .unwrap_or(false);
-
-    if starts_with_models {
-        // "models/<folder>/<file>" -> <app>/models/<folder>/<file>
-        app_root_dir().join(path)
-    } else {
-        // bare relative path -> <app>/models/<...>
-        user_models_root().join(path)
-    }
 }
 
 fn engine_candidate_dirs(app: Option<&AppHandle>, download_dir: PathBuf) -> Vec<PathBuf> {
@@ -708,9 +665,7 @@ fn windows_dependency_search_dirs(engine_path: &Path) -> Vec<PathBuf> {
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     for root in program_roots {
-        let cuda_root = root
-            .join("NVIDIA GPU Computing Toolkit")
-            .join("CUDA");
+        let cuda_root = root.join("NVIDIA GPU Computing Toolkit").join("CUDA");
         for version in ["v13.3", "v13.2", "v13.1", "v13.0", "v13"] {
             let cuda_bin = cuda_root.join(version).join("bin");
             push_dir(&mut dirs, cuda_bin.clone());
@@ -775,9 +730,7 @@ fn format_dependency_diagnostic_error(diagnostic: &EngineDependencyDiagnostic) -
         .collect::<Vec<_>>()
         .join(", ");
     let fixes = diagnostic.suggestions.join(" ");
-    format!(
-        "Engine dependency check failed. Missing: {missing}. {fixes}"
-    )
+    format!("Engine dependency check failed. Missing: {missing}. {fixes}")
 }
 
 #[tauri::command]
@@ -806,8 +759,13 @@ async fn download_engine_dll(
         let mut total_size = 0_u64;
         for filename in files {
             let file_url = format!("{}/{}", base_url, filename);
-            let result =
-                download::download_file(&file_url, &dest_dir, Some(filename), &app, control.clone())?;
+            let result = download::download_file(
+                &file_url,
+                &dest_dir,
+                Some(filename),
+                &app,
+                control.clone(),
+            )?;
             total_size += result.size;
             downloaded_files.push(result.path);
         }
@@ -1103,7 +1061,10 @@ fn prepare_reference_audio(
     Ok(prepared.path)
 }
 
-fn prepare_voice_reference_audio(path: &str, options: &serde_json::Value) -> Result<String, String> {
+fn prepare_voice_reference_audio(
+    path: &str,
+    options: &serde_json::Value,
+) -> Result<String, String> {
     prepare_reference_audio(path, options, Some(REFERENCE_MAX_SECONDS))
 }
 
@@ -1299,7 +1260,7 @@ const ONNXRUNTIME_ZIP_URL: &str =
 const ONNXRUNTIME_DLL_ENTRY_SUFFIX: &str = "lib/onnxruntime.dll";
 
 fn onnxruntime_dll_path() -> PathBuf {
-    app_root_dir().join("onnxruntime.dll")
+    storage::executable_dir().join("onnxruntime.dll")
 }
 
 /// Ensure `onnxruntime.dll` sits next to the exe (portable) and `ORT_DYLIB_PATH`
@@ -1408,7 +1369,7 @@ const SORTFORMER_MODEL_URL: &str =
 const SORTFORMER_MODEL_FILE: &str = "diar_streaming_sortformer_4spk-v2.onnx";
 
 fn sortformer_model_path() -> PathBuf {
-    user_models_root()
+    storage::models_root()
         .join("sortformer")
         .join(SORTFORMER_MODEL_FILE)
 }
@@ -1429,7 +1390,7 @@ async fn download_sortformer(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let dest_dir = user_models_root().join("sortformer");
+    let dest_dir = storage::models_root().join("sortformer");
     let control = state.download_control.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         download::download_file(
@@ -1690,13 +1651,16 @@ fn normalize_wav(wav_base64: String, target_lufs: Option<f64>) -> Result<String,
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn model_listing_candidates() -> Vec<PathBuf> {
+    if storage::is_portable() {
+        return vec![storage::models_root()];
+    }
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
     vec![
         exe.parent()
             .and_then(|p| p.parent())
             .map(|p| p.join("models"))
             .unwrap_or_else(|| PathBuf::from("models")),
-        user_models_root(),
+        storage::models_root(),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
@@ -1733,7 +1697,7 @@ async fn download_model(
     state: State<'_, AppState>,
     request: download::DownloadRequest,
 ) -> Result<serde_json::Value, String> {
-    let dest_dir = resolve_download_dest_dir(&request.dest_dir);
+    let dest_dir = storage::resolve_download_dest_dir(&request.dest_dir);
     let control = state.download_control.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         download::download_file(
@@ -2013,9 +1977,7 @@ fn api_find_speaker<'a>(
         .find(|speaker| speaker.id == key || speaker.name.to_lowercase() == key_lc)
 }
 
-fn api_current_speakers(
-    speakers: &Arc<Mutex<Vec<ApiSpeakerPersona>>>,
-) -> Vec<ApiSpeakerPersona> {
+fn api_current_speakers(speakers: &Arc<Mutex<Vec<ApiSpeakerPersona>>>) -> Vec<ApiSpeakerPersona> {
     speakers
         .lock()
         .map(|guard| guard.clone())
@@ -2162,7 +2124,9 @@ fn write_streaming_response_header(stream: &mut TcpStream) -> Result<(), String>
         "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n",
         "Connection: close\r\n\r\n"
     );
-    stream.write_all(header.as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(header.as_bytes())
+        .map_err(|e| e.to_string())?;
     stream.flush().map_err(|e| e.to_string())
 }
 
@@ -2172,7 +2136,9 @@ fn write_ndjson_event(
 ) -> Result<(), String> {
     let mut bytes = serde_json::to_vec(&value).map_err(|e| e.to_string())?;
     bytes.push(b'\n');
-    let mut stream = writer.lock().map_err(|_| "stream writer poisoned".to_string())?;
+    let mut stream = writer
+        .lock()
+        .map_err(|_| "stream writer poisoned".to_string())?;
     stream.write_all(&bytes).map_err(|e| e.to_string())?;
     stream.flush().map_err(|e| e.to_string())
 }
@@ -2256,8 +2222,7 @@ fn handle_api_stream_request(
     speakers: Arc<Mutex<Vec<ApiSpeakerPersona>>>,
 ) -> (u16, String) {
     if req.method != "POST" {
-        let (status, content_type, body, message) =
-            json_error(404, "not_found", "route not found");
+        let (status, content_type, body, message) = json_error(404, "not_found", "route not found");
         write_http_response(stream, status, content_type, &body);
         return (status, message);
     }
@@ -2281,13 +2246,9 @@ fn handle_api_stream_request(
     let format = match api_response_format(&body) {
         Ok(format) => format,
         Err(e) => {
-        let (status, content_type, body, message) = json_error(
-            400,
-            "format_not_supported",
-            e,
-        );
-        write_http_response(stream, status, content_type, &body);
-        return (status, message);
+            let (status, content_type, body, message) = json_error(400, "format_not_supported", e);
+            write_http_response(stream, status, content_type, &body);
+            return (status, message);
         }
     };
 
@@ -2360,7 +2321,9 @@ fn handle_api_stream_request(
     let workflow: String;
     let label: String;
     enum StreamRequestKind {
-        Tts { text: String },
+        Tts {
+            text: String,
+        },
         VoiceClone {
             text: String,
             ref_wav: String,
@@ -2372,7 +2335,10 @@ fn handle_api_stream_request(
         },
     }
 
-    let request_kind = if mode == "continue" || mode == "continue_speech" || body.get("audio_path").is_some() {
+    let request_kind = if mode == "continue"
+        || mode == "continue_speech"
+        || body.get("audio_path").is_some()
+    {
         let audio_path = body
             .get("audio_path")
             .and_then(|v| v.as_str())
@@ -2551,7 +2517,9 @@ fn handle_api_stream_request(
     let progress = api_stream_progress_callback(app, writer.clone(), &job_id, &workflow, &label);
     let audio_chunk = api_stream_audio_callback(writer.clone());
     let result = match request_kind {
-        StreamRequestKind::Tts { text } => engine.generate_tts_stream(&text, &options, progress, audio_chunk),
+        StreamRequestKind::Tts { text } => {
+            engine.generate_tts_stream(&text, &options, progress, audio_chunk)
+        }
         StreamRequestKind::VoiceClone {
             text,
             ref_wav,
@@ -2601,7 +2569,11 @@ fn handle_api_stream_request(
                         "encoding": format!("{}-base64", format),
                     });
                     if let Some(map) = payload.as_object_mut() {
-                        let key = if format == "mp3" { "mp3Base64" } else { "wavBase64" };
+                        let key = if format == "mp3" {
+                            "mp3Base64"
+                        } else {
+                            "wavBase64"
+                        };
                         map.insert(key.into(), serde_json::json!(base64_encode(&final_bytes)));
                     }
                     let _ = write_ndjson_event(&writer, payload);
@@ -2761,7 +2733,11 @@ fn handle_api_request(
                         map.insert("normalize_reference".into(), serde_json::json!(true));
                     }
                 }
-                set_string_option(&mut api_options, "reference_cache_path", &speaker.cache_path);
+                set_string_option(
+                    &mut api_options,
+                    "reference_cache_path",
+                    &speaker.cache_path,
+                );
                 let api_options = api_stream_options(api_options);
                 let ref_wav = match prepare_voice_reference_audio(&speaker.ref_path, &api_options) {
                     Ok(path) => path,
@@ -2938,12 +2914,9 @@ fn handle_api_request(
                         "Complete",
                     );
                     match encode_api_audio_response(&audio, format) {
-                        Ok((content_type, bytes)) => (
-                            200,
-                            content_type,
-                            bytes,
-                            "speech generated".to_string(),
-                        ),
+                        Ok((content_type, bytes)) => {
+                            (200, content_type, bytes, "speech generated".to_string())
+                        }
                         Err(e) => json_error(500, "audio_encode_failed", e),
                     }
                 }
@@ -3512,11 +3485,13 @@ fn safe_file_part(value: &str) -> String {
     }
 }
 
-fn speaker_store_root(_app: &AppHandle) -> Result<PathBuf, String> {
-    // Portable: keep speaker personas next to the executable instead of %APPDATA%.
-    let root = app_root_dir().join("speakers");
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    Ok(root)
+fn speaker_store_root(app: &AppHandle) -> Result<PathBuf, String> {
+    storage::speaker_store_root(app)
+}
+
+#[tauri::command]
+fn storage_layout(app: AppHandle) -> Result<storage::StorageLayoutInfo, String> {
+    storage::layout_info(&app)
 }
 
 fn speaker_dir(app: &AppHandle, id: &str, name: &str) -> Result<PathBuf, String> {
@@ -3601,7 +3576,7 @@ fn collect_voicepack_voices(root: &Path) -> Vec<VoicePackVoice> {
 fn download_voicepack(force: Option<bool>) -> Result<Vec<VoicePackVoice>, String> {
     use std::io::Write as _;
     let force = force.unwrap_or(false);
-    let root = app_root_dir();
+    let root = storage::executable_dir();
     let voicepack_dir = root.join("voicepack");
 
     if !force {
@@ -3820,7 +3795,11 @@ fn export_speaker_zip(
         } else {
             speaker_cache_file(&app, &speaker.id, &speaker.name)?
         };
-        add_zip_file(&mut zip, &cache_path, &format!("{}/cache/speaker.hspkcache", dir))?;
+        add_zip_file(
+            &mut zip,
+            &cache_path,
+            &format!("{}/cache/speaker.hspkcache", dir),
+        )?;
     }
     zip.finish().map_err(|e| e.to_string())?;
     Ok(())
@@ -3923,9 +3902,16 @@ fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn audio_waveform(audio_path: String, points: Option<usize>) -> Result<serde_json::Value, String> {
+async fn audio_waveform(
+    audio_path: String,
+    points: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let points = points.unwrap_or(1200);
     let peaks =
-        audio::waveform_peaks(&audio_path, points.unwrap_or(1200)).map_err(|e| e.to_string())?;
+        tauri::async_runtime::spawn_blocking(move || audio::waveform_peaks(&audio_path, points))
+            .await
+            .map_err(|e| format!("task join error: {e}"))?
+            .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "peaks": peaks }))
 }
 
@@ -3988,12 +3974,40 @@ async fn prepare_reference_upload(
 }
 
 #[tauri::command]
-fn read_audio_as_wav(
+async fn trim_reference_audio(
+    audio_path: String,
+    start_seconds: f64,
+    end_seconds: f64,
+    max_seconds: Option<f64>,
+) -> Result<serde_json::Value, String> {
+    let max_seconds = max_seconds
+        .filter(|seconds| *seconds > 0.0)
+        .unwrap_or(REFERENCE_MAX_SECONDS);
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        audio::trim_reference_wav(&audio_path, start_seconds, end_seconds, max_seconds)
+    })
+    .await
+    .map_err(|e| format!("task join error: {e}"))?
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "path": prepared.path,
+        "durationSeconds": prepared.duration_seconds,
+        "cropped": prepared.cropped,
+    }))
+}
+
+#[tauri::command]
+async fn read_audio_as_wav(
     audio_path: String,
     target_sample_rate: Option<i32>,
 ) -> Result<serde_json::Value, String> {
     let (wav, sample_rate, channels, sample_count) =
-        audio::decode_to_pcm16_wav(&audio_path, target_sample_rate).map_err(|e| e.to_string())?;
+        tauri::async_runtime::spawn_blocking(move || {
+            audio::decode_to_pcm16_wav(&audio_path, target_sample_rate)
+        })
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+        .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "sampleRate": sample_rate,
         "channels": channels,
@@ -4002,16 +4016,12 @@ fn read_audio_as_wav(
     }))
 }
 
-#[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Only http(s) URLs are allowed".into());
-    }
+fn open_in_default_browser(target: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", &url])
+            .args(["url.dll,FileProtocolHandler", target])
             .creation_flags(0x08000000)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -4019,18 +4029,51 @@ fn open_external_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
-            .arg(&url)
+            .arg(target)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
-            .arg(&url)
+            .arg(target)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("Only http(s) URLs are allowed".into());
+    }
+    open_in_default_browser(&url)
+}
+
+#[tauri::command]
+fn open_api_console(app: AppHandle, base_url: String) -> Result<(), String> {
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let relative = PathBuf::from("api-console").join("higgs-console.html");
+    let console_path = [
+        resource_dir.join("resources").join(&relative),
+        resource_dir.join(&relative),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(&relative),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+    .ok_or_else(|| "Bundled API test console was not found".to_string())?;
+
+    let mut console_url = tauri::Url::from_file_path(&console_path)
+        .map_err(|_| format!("Could not create a file URL for {}", console_path.display()))?;
+    if base_url.starts_with("http://") || base_url.starts_with("https://") {
+        console_url
+            .query_pairs_mut()
+            .append_pair("baseUrl", &base_url);
+    }
+    open_in_default_browser(console_url.as_str())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -4249,7 +4292,7 @@ fn configure_onnx_dylib() {
     if std::env::var_os("ORT_DYLIB_PATH").is_some() {
         return;
     }
-    let root = app_root_dir();
+    let root = storage::executable_dir();
     let candidates = [
         root.join("onnxruntime.dll"),
         root.join("resources").join("onnxruntime.dll"),
@@ -4262,16 +4305,15 @@ fn configure_onnx_dylib() {
 pub fn run() {
     configure_onnx_dylib();
 
-    // Portable: keep WebView2 state (localStorage settings) inside the app folder.
-    // WebView2 honours this env var when the host does not set an explicit folder.
-    if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
-        std::env::set_var(
-            "WEBVIEW2_USER_DATA_FOLDER",
-            app_root_dir().join("webview-data"),
-        );
+    if let Err(error) = storage::initialize() {
+        eprintln!("{error}");
     }
-
-    let engine_dir = default_engine_download_dir();
+    if storage::is_portable() && std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+        if let Some(webview_dir) = storage::webview_dir() {
+            std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", webview_dir);
+        }
+    }
+    let engine_dir = storage::engine_dir();
 
     tauri::Builder::default()
         .setup(|app| {
@@ -4358,9 +4400,6 @@ pub fn run() {
             download_voiceclean,
             unload_asr,
             normalize_wav,
-            recorder::start_recording,
-            recorder::stop_recording,
-            recorder::list_input_devices,
             list_models,
             download_model,
             download_control,
@@ -4379,9 +4418,15 @@ pub fn run() {
             export_speaker_zip,
             import_speaker_zip,
             prepare_reference_upload,
+            trim_reference_audio,
             audio_waveform,
             read_audio_as_wav,
+            storage_layout,
+            recorder::list_microphone_devices,
+            recorder::start_reference_recording,
+            recorder::stop_reference_recording,
             open_external_url,
+            open_api_console,
             hardware_snapshot,
             set_minimize_to_tray,
             quit_app,

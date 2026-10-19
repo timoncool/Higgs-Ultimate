@@ -117,6 +117,35 @@ export type GenerationAudioChunkEvent = {
   isFinal: boolean;
 };
 
+export type MicrophoneDevice = {
+  name: string;
+  isDefault: boolean;
+};
+
+export type RecordingStarted = {
+  sessionId: string;
+  deviceName: string;
+  sampleRate: number;
+  maxSeconds: number;
+};
+
+export type RecordingMeterEvent = {
+  sessionId: string;
+  low: number;
+  high: number;
+  peak: number;
+  elapsedSeconds: number;
+};
+
+export type RecordingResult = {
+  sessionId: string;
+  path: string;
+  deviceName: string;
+  sampleRate: number;
+  durationSeconds: number;
+  reachedLimit: boolean;
+};
+
 export type DownloadProgressEvent = {
   downloaded: number;
   total: number;
@@ -276,7 +305,7 @@ export type RefPlayer = {
   waveformPath: string;
   waveformLoading: boolean;
   raf: number | null;
-  previewObjectUrl: string;
+  previewObjectUrl: string | null;
   previewToken: number;
 };
 

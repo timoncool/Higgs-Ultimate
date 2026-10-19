@@ -183,7 +183,7 @@
                    aria-label="Drop audio file or click to browse">
                 <div class="dropzone-empty">
                   <p>⤒ Drop audio file here, or click to browse</p>
-                  <p class="dropzone-hint">mp3 · wav · flac · m4a — auto-cropped to 30s</p>
+                  <p class="dropzone-hint">wav · mp3 · flac · m4a · ogg/opus · webm — auto-cropped to 30s</p>
                 </div>
               </div>
               <div class="record-row">
@@ -195,6 +195,7 @@
                   <button class="ref-play" id="clone-ref-play" type="button" aria-label="Play reference">▶</button>
                   <input class="ref-seek" id="clone-ref-seek" type="range" min="0" max="1000" value="0" />
                   <span class="ref-time" id="clone-ref-time">00:00 / 00:00</span>
+                  <button class="compact-button ref-trim-button" id="clone-ref-trim" type="button">Trim</button>
                 </div>
                 <canvas class="ref-waveform" id="clone-ref-waveform"></canvas>
               </div>
@@ -256,7 +257,7 @@
                          aria-label="Drop speaker reference audio or click to browse">
                       <div class="dropzone-empty">
                         <p>⤒ Drop reference voice here, or click to browse</p>
-                        <p class="dropzone-hint">mp3 · wav · flac · m4a — auto-cropped to 30s</p>
+                        <p class="dropzone-hint">wav · mp3 · flac · m4a · ogg/opus · webm — auto-cropped to 30s</p>
                       </div>
                     </div>
                     <div class="record-row">
@@ -267,6 +268,7 @@
                         <button class="ref-play" id="gallery-ref-play" type="button" aria-label="Play speaker reference">▶</button>
                         <input class="ref-seek" id="gallery-ref-seek" type="range" min="0" max="1000" value="0" />
                         <span class="ref-time" id="gallery-ref-time">00:00 / 00:00</span>
+                        <button class="compact-button ref-trim-button" id="gallery-ref-trim" type="button">Trim</button>
                       </div>
                       <canvas class="ref-waveform" id="gallery-ref-waveform"></canvas>
                     </div>
@@ -312,7 +314,7 @@
                    aria-label="Drop the clip to continue or click to browse">
                 <div class="dropzone-empty">
                   <p>⤒ Drop the clip to continue, or click to browse</p>
-                  <p class="dropzone-hint">mp3 · wav · flac · m4a</p>
+                  <p class="dropzone-hint">wav · mp3 · flac · m4a · ogg/opus · webm</p>
                 </div>
               </div>
               <div class="record-row">
@@ -323,6 +325,7 @@
                   <button class="ref-play" id="finish-ref-play" type="button" aria-label="Play reference">▶</button>
                   <input class="ref-seek" id="finish-ref-seek" type="range" min="0" max="1000" value="0" />
                   <span class="ref-time" id="finish-ref-time">00:00 / 00:00</span>
+                  <button class="compact-button ref-trim-button" id="finish-ref-trim" type="button">Trim</button>
                 </div>
                 <canvas class="ref-waveform" id="finish-ref-waveform"></canvas>
               </div>
@@ -522,6 +525,7 @@
                   <span id="api-status-text" class="api-status-text">Stopped</span>
                 </div>
                 <div class="api-actions">
+                  <button id="api-open-console-btn" class="compact-button" type="button" title="Open the self-contained API test console in your default browser">Test Console</button>
                   <button id="api-info-btn" class="compact-button" type="button">API Info</button>
                   <button id="api-start-btn" class="compact-button primary" type="button">Start</button>
                   <button id="api-stop-btn" class="compact-button danger" type="button" disabled>Stop</button>

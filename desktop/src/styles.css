@@ -812,7 +812,7 @@ input[type="range"]::-moz-range-thumb {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   margin-bottom: 8px;
 }
 .ref-play {
@@ -836,7 +836,97 @@ input[type="range"]::-moz-range-thumb {
   min-width: 92px;
   text-align: right;
 }
+.ref-trim-button { min-width: 48px; }
 .ref-waveform { display: block; height: 42px; width: 100%; }
+
+/* ─── Reference microphone recorder ─── */
+.reference-recorder {
+  background: var(--bg-inner);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 8px;
+  padding: 8px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.reference-recorder.recording {
+  border-color: #ef4444;
+  box-shadow: inset 3px 0 0 #ef4444;
+}
+.recorder-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.recorder-device {
+  flex: 1 1 140px;
+  font-size: 12px;
+  height: 30px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 3px 26px 3px 8px;
+  width: auto;
+}
+.reference-recorder .icon-button {
+  height: 30px;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+  width: 30px;
+}
+.recorder-start {
+  color: #ef4444;
+  font-size: 16px;
+}
+.recorder-start:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #dc2626;
+}
+.recorder-stop {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #fff;
+  font-size: 12px;
+}
+.recorder-stop:hover:not(:disabled) { background: #dc2626; border-color: #dc2626; }
+.recorder-stop.busy { animation: recording-pulse 900ms ease-in-out infinite; }
+.recorder-remove:hover:not(:disabled) { border-color: #ef4444; color: #ef4444; }
+.recorder-time {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 720;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+}
+.recorder-waveform {
+  display: block;
+  height: 46px;
+  margin-top: 7px;
+  width: 100%;
+}
+.reference-recorder.compact .recorder-device { flex-basis: 120px; }
+.reference-recorder.compact .icon-button {
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
+  width: 28px;
+}
+.reference-recorder.compact .recorder-waveform { height: 38px; }
+.reference-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 7px;
+}
+@keyframes recording-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 35%); }
+  50% { box-shadow: 0 0 0 5px rgb(239 68 68 / 0%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recorder-stop.busy { animation: none; }
+}
 
 /* ─── Advanced options ─── */
 .advanced-options {
@@ -999,7 +1089,11 @@ input[type="range"]::-moz-range-thumb {
 .slider-label .toggle-switch {
   align-self: center;
 }
-.reference-normalize-toggle { margin-left: auto; }
+.reference-normalize-toggle {
+  justify-content: flex-start;
+  margin-left: auto;
+  width: max-content;
+}
 .speaker-card .reference-normalize-toggle { margin-left: 0; max-width: none; }
 
 @media (max-width: 900px) {
@@ -1860,6 +1954,53 @@ input[type="range"]::-moz-range-thumb {
   justify-content: flex-end;
   padding-top: 12px;
 }
+.reference-trim-panel {
+  max-width: min(720px, 94vw);
+  width: min(720px, 94vw);
+}
+.reference-trim-audio { width: 100%; }
+.reference-trim-waveform {
+  background: var(--bg-inner);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: block;
+  height: 108px;
+  width: 100%;
+}
+.reference-trim-ranges {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.reference-trim-ranges label {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) 86px;
+}
+.reference-trim-ranges label > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 720;
+}
+.reference-trim-ranges input[type="number"] { min-width: 0; }
+.reference-trim-tools {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.reference-trim-selection {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 760;
+  margin: 0;
+  text-align: center;
+}
+@media (max-width: 680px) {
+  .reference-trim-ranges { grid-template-columns: 1fr; }
+  .reference-trim-tools { grid-template-columns: 1fr; }
+}
 .speaker-export-list {
   display: grid;
   gap: 8px;
@@ -2149,6 +2290,7 @@ input[type="range"]::-moz-range-thumb {
   .section-head { align-items: stretch; flex-direction: column; }
   .speaker-card-head,
   .line-main { grid-template-columns: 1fr; }
+  .recorder-time { text-align: right; }
 }
 
 /* Flash animation for auto-transcribe result */

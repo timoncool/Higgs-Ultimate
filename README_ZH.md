@@ -4,7 +4,7 @@
 
 作者: [Saganaki22](https://github.com/Saganaki22)
 
-Higgs Audio v3 Studio `0.2.4` 是一个使用 Rust/Tauri 构建的 Windows 桌面
+Higgs Audio v3 Studio `0.3.0` 是一个使用 Rust/Tauri 构建的 Windows 桌面
 应用，用来通过移植后的原生 C++/CUDA 引擎在本机运行 Higgs Audio v3 TTS
 推理。应用不会通过 Python 环境或 CLI sidecar 绕一圈，而是由 Tauri 前端
 调用 Rust 命令，Rust 再通过 `libloading` 加载 `audiocpp_engine.dll`，最后
@@ -17,7 +17,8 @@ Higgs Audio v3 Studio `0.2.4` 是一个使用 Rust/Tauri 构建的 Windows 桌�
 
 这个项目的目标是提供一个实用的本地语音生成工作流：普通 TTS、声音克隆、
 继续说话、多说话人生成、带去爆音处理和波形拖动定位的实时流式播放、本地 API 流式响应、Whisper
-自动转写、WAV/MP3 导出、说话人缓存复用，以及 GPU/VRAM 监控。
+自动转写、WAV/MP3 导出、说话人缓存复用，以及 GPU/VRAM 监控。Telegram/WhatsApp
+的 OGG/Opus 语音和 WebM/Opus 参考音频由应用内置解码，无需安装 FFmpeg。
 
 ## 下载
 
@@ -96,19 +97,45 @@ drbaph/Higgs-Audio-v3-Studio/
 
 ## 运行时文件
 
-便携版/安装包自带的应用目录：
+三个 Windows 安装包运行的是同一个应用，但存储方式分为两种：
+
+| 包 | 程序文件 | 引擎下载 | 模型下载 | 设置、说话人与临时音频 |
+| --- | --- | --- | --- | --- |
+| 便携版目录 | 与 EXE 放在一起 | EXE 旁的 `resources/engine/` | EXE 旁的 `models/` | EXE 旁的 `data/` |
+| NSIS 安装 EXE | 由 NSIS 向导安装 | `%LOCALAPPDATA%\Higgs Audio v3 Studio\engine\` | `%USERPROFILE%\audiocpp\models\` | Windows 当前用户的 AppData/临时目录 |
+| MSI 安装包 | 由 Windows Installer 安装 | `%LOCALAPPDATA%\Higgs Audio v3 Studio\engine\` | `%USERPROFILE%\audiocpp\models\` | Windows 当前用户的 AppData/临时目录 |
+
+便携版对应用自己管理的全部可写数据采用自包含存储。请保持整个文件夹完整，
+并把它放在普通可写目录中运行。`portable.flag` 会把引擎/模型下载、设置、
+说话人、参考缓存、录音、临时音频和 WebView 数据都保存在便携版目录内：
 
 ```text
-Higgs Audio v3 Studio.exe
-resources/
-  engine/
-    audiocpp_engine.dll          # 自带的主引擎 DLL
-  higgs-assets/
-    higgs-audio-v3-tts-4b/
-      config/tokenizer assets
+Higgs Audio v3 Studio 0.3.0 Portable/
+  Higgs Audio v3 Studio.exe
+  portable.flag
+  resources/
+    engine/                       # 点击 Download Engine DLLs 后写入
+    higgs-assets/                 # Higgs config/tokenizer 资源
+    api-console/                  # 浏览器 API 测试控制台
+  models/                         # Higgs 与 Whisper 下载
+  data/
+    speakers/                     # 说话人身份与缓存
+    temp/                         # 录音和准备后的临时音频
+    webview/                      # 设置、API key 与 WebView2 状态
 ```
 
-点击 `Download Engine DLLs` 后下载到用户 app data 的引擎包：
+便携版包含 Higgs 支持资源与 API 测试控制台，但不打包原生引擎/runtime DLL，
+也不包含数 GB 的 GGUF 权重。点击 `Download Engine DLLs` 后，引擎包会从
+Hugging Face 下载到 `resources/engine/`。模型或 Whisper 文件会保存到便携版
+的 `models/` 目录。移动整个便携版目录到另一个可写磁盘时，应用数据也会
+一起移动。
+
+NSIS 与 MSI 都属于安装版。程序和打包的只读资源位于 Windows 安装目录，
+可变下载与用户数据则写入当前用户可写目录，从而避免在 `Program Files`
+下出现 `Access is denied`。NSIS 是普通图形安装向导；MSI 使用 Windows
+Installer，更适合集中部署、修复和 MSI 卸载工具。两者运行功能相同。
+
+安装版没有 `portable.flag`。引擎下载目录为：
 
 ```text
 %LOCALAPPDATA%/
@@ -123,10 +150,10 @@ resources/
       VCRUNTIME140_1.dll
 ```
 
-默认下载的模型目录：
+安装版默认模型下载目录为：
 
 ```text
-models/
+C:\Users\<you>\audiocpp\models\
   higgs-q8_0/
     q8_0.gguf
     config/tokenizer/chat-template assets
@@ -142,18 +169,14 @@ models/
   higgs-bf16/
     bf16.gguf
     config/tokenizer/chat-template assets
-models/whisper/
+  whisper/
   ggml-base.en-q8_0.bin
 ```
 
-应用内下载的引擎包会保存到用户可写的 app data 目录，避免安装到
-`Program Files` 后出现 Windows 权限错误。这个引擎包包含
+引擎包包含
 `audiocpp_engine.dll`、cuBLAS/cuBLASLt CUDA 13 runtime DLL，以及当前引擎
-需要的 MSVC/OpenMP runtime DLL。模型下载默认保存到：
-
-```text
-C:\Users\<you>\audiocpp\models\
-```
+需要的 MSVC/OpenMP runtime DLL。应用也会自动检查打包资源与系统中兼容的
+CUDA/MSVC runtime 目录。
 
 ## Speaker Gallery
 
@@ -162,6 +185,16 @@ Speaker Gallery 用来管理可复用的说话人身份。Voice Clone、Continue
 参考音频，不会被强制使用图库。Voice Clone 和 Speaker Gallery 新上传的参考
 音频会自动准备为 WAV，并限制为前 30 秒，避免误上传长音频浪费推理准备时间；
 Continue Speech 会保留完整源音频，因为这个工作流可能需要继续较长内容。
+
+同一组参考音频位置也可以直接使用麦克风录音。Voice Clone、Continue Speech、
+Speaker Gallery，以及 Multi Speaker 的每个说话人卡片都可以选择输入设备、开始
+或停止录音、查看实时波形，并在录音成功完成后替换当前参考音频。录音最长 30 秒，
+保存为单声道 WAV。Whisper 自动转写仍然是可选功能；录音器本身不执行说话人分离。
+
+参考音频还可以选择开始点和结束点、试听选区并应用裁剪。Voice Clone、
+Continue Speech、Speaker Gallery、Multi Speaker 说话人以及每行独立参考音频
+都支持该功能。应用裁剪后会写入新的 WAV，替换 Higgs 和 Whisper 实际使用的
+参考文件，并清除旧的说话人缓存；克隆参考选区最长为 30 秒。
 
 创建或编辑说话人时，应用会在用户 app data 的 speaker store 中保存文件：
 
@@ -186,7 +219,11 @@ speakers/
 过的 `.hspkcache` 参考编码缓存。这个缓存会在保存的说话人第一次参与推理后
 创建，之后 Voice Clone、Continue Speech、Multi Speaker 和保存说话人的 API
 请求都可以复用它，减少重复的参考音频准备工作。模型内部的 KV prefix 或激活
-缓存不会序列化，因为它们与具体模型和量化版本强相关。
+缓存不会序列化，因为它们与具体模型和量化版本强相关。`.hspkcache` 保存的是
+离散 codec ID，而不是模型 KV；使用默认 `higgs_tts` 量化策略、来自同一源模型
+的官方 Q4_K_M/Q5_K/Q6_K/Q8_0/BF16 可以共用，因为该策略会保留 codec encoder
+张量。不同模型或 codec 版本、微调模型、以及自定义 `--policy all` 量化应重新
+生成缓存。
 
 生成队列管理器会显示当前正在生成的任务和等待中的 UI 任务。等待中的任务可
 以编辑、删除，或者一次性清空；API 请求仍由后端队列锁串行执行，避免多个推
@@ -194,7 +231,8 @@ speakers/
 
 Multi Speaker 生成会在开始前检查所有台词。如果某一行指向不存在的说话人，
 或者说话人还没有参考音频，应用会立刻提示需要修复的行，而不是等生成到那一
-行才失败。生成过程中进度文本会显示 `Line 1/42`、`Line 2/42` 这类行进度。
+行才失败。生成过程中进度文本会显示 `Line 1/42`、`Line 2/42` 这类行进度；
+原生引擎提供 token 总数时，耗时旁边也会显示 `Tokens 当前值 / 最大值`。
 
 ## 本地 API
 
@@ -238,6 +276,11 @@ Authorization: Bearer <your-api-key>
 `wavBase64` 解码成 WAV 字节并送入自己的播放器或音频队列；`event` 为
 `final` 时检查 `encoding`，如果是 `wav-base64` 就保存 `wavBase64`，如果是
 `mp3-base64` 就保存 `mp3Base64`。
+
+API 页的 `Test Console` 按钮会在系统默认浏览器中打开随应用打包的独立测试
+控制台，并自动填入当前 API 根地址。应用会把当前 API key 复制到剪贴板，方便
+粘贴到控制台。该控制台可以测试健康状态、普通 TTS、参考音频或保存说话人的
+声音克隆、Continue Speech、WAV/MP3 完成文件以及 NDJSON 流式响应。
 
 ```python
 import base64
@@ -293,9 +336,12 @@ Windows CUDA DLL：
 Tauri 打包：
 
 ```powershell
-cd desktop
-npm run build -- --bundles nsis
+.\scripts\package_windows_release.ps1
 ```
+
+该脚本会构建 MSI、NSIS 和自包含便携目录；只有便携目录会得到
+`portable.flag`。如果系统能找到 `upx.exe`，脚本只压缩便携版 EXE。所有应用
+安装包都会排除引擎 DLL；用户需要时通过应用从 Hugging Face `engines/` 下载。
 
 ## 常见问题
 
@@ -339,6 +385,12 @@ models/higgs-q8_0/q8_0.gguf
 
 在左侧 Whisper 面板选择并下载一个 `ggml-*.bin` 模型。推荐默认模型是
 `base.en-q8_0`，`base.en` 也会在下拉框中标星。
+
+### OGG/Opus 或 WebM/Opus 参考音频无法加载
+
+`0.3.0` 起应用通过静态链接的 `libopus` 在进程内解码 Telegram/WhatsApp
+OGG/Opus 和 WebM/Opus。损坏、空白、Opus multi-stream 或超过双声道的文件会
+显示明确的解码错误，不再被当成成功的空波形。
 
 ### 生成时显存突然接近满载
 

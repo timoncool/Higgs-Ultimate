@@ -1,0 +1,1330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Higgs Signal Console — API Test Harness</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg: #12151a;
+    --bg-soft: #161a20;
+    --panel: #1b2027;
+    --panel-2: #1f242c;
+    --line: #2a313b;
+    --line-soft: #232933;
+    --ink: #edf1f4;
+    --ink-dim: #96a3b0;
+    --ink-faint: #5c6773;
+    --amber: #ffb454;
+    --amber-ink: #241a08;
+    --violet: #b48cff;
+    --violet-ink: #1b1330;
+    --cyan: #52d9cd;
+    --cyan-ink: #06211f;
+    --green: #79e6a7;
+    --red: #ff6b6b;
+    --ch-health: var(--green);
+    --ch-speak: var(--amber);
+    --ch-clone: var(--violet);
+    --ch-continue: var(--cyan);
+    --radius: 12px;
+    --radius-sm: 8px;
+    --font-display: -apple-system, "Segoe UI", "Segoe UI Variable", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "SF Mono", "Cascadia Mono", "JetBrains Mono", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+  }
+
+  *{ box-sizing: border-box; }
+  html,body{ margin:0; }
+  body{
+    background: radial-gradient(1100px 700px at 12% -10%, #171c24 0%, var(--bg) 55%) fixed;
+    color: var(--ink);
+    font-family: var(--font-display);
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  body::before{
+    content:"";
+    position: fixed; inset:0; pointer-events:none; z-index:0;
+    background-image: repeating-linear-gradient(to bottom, rgba(255,255,255,0.012) 0px, rgba(255,255,255,0.012) 1px, transparent 1px, transparent 3px);
+    opacity:.5;
+  }
+
+  a{ color: var(--cyan); }
+  button{ font-family: inherit; }
+  input,select,textarea,button{ color: inherit; }
+
+  .skip{ position:absolute; left:-9999px; }
+  :focus-visible{ outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 4px; }
+
+  .topbar{
+    position: relative; z-index:1;
+    display:flex; align-items:center; justify-content: space-between;
+    gap:16px; padding: 16px 22px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand-mark{ width:34px; height:34px; flex:0 0 auto; }
+  .brand-text .eyebrow{ display:block; font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); font-weight:700; }
+  .brand-text h1{ margin:1px 0 0; font-size:19px; font-weight:800; letter-spacing:-.01em; }
+
+  .conn-status{ display:flex; align-items:center; gap:8px; font-size:12.5px; color: var(--ink-dim); font-family: var(--font-mono); }
+  .led{ width:9px; height:9px; border-radius:50%; background: var(--ink-faint); box-shadow: none; flex:0 0 auto; }
+  .led.ok{ background: var(--green); box-shadow: 0 0 0 3px rgba(121,230,167,.18); }
+  .led.fail{ background: var(--red); box-shadow: 0 0 0 3px rgba(255,107,107,.18); }
+  .led.running{ background: var(--amber); box-shadow: 0 0 0 3px rgba(255,180,84,.2); animation: ledpulse 1s ease-in-out infinite; }
+  .led.active{ background: var(--accent, var(--cyan)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, var(--cyan)) 25%, transparent); animation: ledpulse 1.1s ease-in-out infinite; }
+  .led.done{ background: var(--green); }
+  .led.error, .led.stopped{ background: var(--red); }
+  .led.pending{ background: var(--line-soft); }
+  @keyframes ledpulse{ 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
+  @media (prefers-reduced-motion: reduce){ .led.running, .led.active{ animation:none; } }
+
+  .shell{
+    position: relative; z-index:1;
+    max-width: 1180px; margin: 0 auto;
+    display:grid; grid-template-columns: 300px 1fr; gap: 20px;
+    padding: 22px;
+    align-items: start;
+  }
+
+  .card{
+    background: linear-gradient(180deg, rgba(255,255,255,.025), transparent 40%), var(--panel);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px;
+  }
+  .card + .card{ margin-top: 16px; }
+  .card-title{ font-size: 12px; text-transform: uppercase; letter-spacing:.08em; color: var(--ink-dim); font-weight:800; margin: 0 0 12px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+
+  label.field-label{ display:block; font-size: 12.5px; font-weight:700; color: var(--ink-dim); margin: 12px 0 6px; }
+  label.field-label:first-child{ margin-top:0; }
+  .hint{ font-size: 11.5px; color: var(--ink-faint); margin: 5px 0 0; line-height:1.4; }
+  .hint.warn{ color: var(--amber); }
+
+  input[type="text"], input[type="number"], input[type="password"], textarea, select{
+    width:100%; background: var(--bg-soft); border:1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 9px 10px; font-size: 13.5px; font-family: var(--font-mono);
+  }
+  textarea{ resize:vertical; min-height: 84px; line-height:1.45; font-family: var(--font-display); font-size:14px; }
+  select{ font-family: var(--font-display); }
+
+  .keyrow{ display:flex; gap:6px; }
+  .keyrow input{ flex:1; }
+  .iconbtn{ flex:0 0 auto; background: var(--panel-2); border:1px solid var(--line); border-radius: var(--radius-sm); width:38px; padding:0; cursor:pointer; }
+  .iconbtn:hover{ border-color: var(--ink-faint); }
+
+  .switch-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .switch-copy .t{ font-size:13.5px; font-weight:700; }
+  .switch-copy .d{ font-size:11.5px; color: var(--ink-faint); margin-top:2px; }
+  .switch{ position:relative; width:44px; height:24px; flex:0 0 auto; }
+  .switch input{ position:absolute; inset:0; opacity:0; margin:0; cursor:pointer; }
+  .switch .track{ position:absolute; inset:0; background: var(--panel-2); border:1px solid var(--line); border-radius:999px; transition: background .15s, border-color .15s; }
+  .switch .thumb{ position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background: var(--ink-faint); transition: transform .15s, background .15s; }
+  .switch input:checked + .track{ background: color-mix(in srgb, var(--cyan) 20%, var(--panel-2)); border-color: var(--cyan); }
+  .switch input:checked + .track + .thumb{ transform: translateX(18px); background: var(--cyan); box-shadow: 0 0 8px color-mix(in srgb, var(--cyan) 60%, transparent); }
+  .switch input:focus-visible + .track{ outline: 2px solid var(--cyan); outline-offset:2px; }
+
+  details.adv{ border-top: 1px solid var(--line-soft); margin-top: 14px; padding-top: 10px; }
+  details.adv summary{ cursor:pointer; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color: var(--ink-dim); font-weight:800; list-style: none; display:flex; align-items:center; gap:6px; }
+  details.adv summary::before{ content:"▸"; font-size:10px; color: var(--ink-faint); transition: transform .15s; }
+  details.adv[open] summary::before{ transform: rotate(90deg); }
+  .grid2{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+
+  .seedrow{ display:flex; gap:6px; }
+  .seedrow input{ flex:1; }
+
+  .tablist{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+  .tab{
+    display:flex; align-items:center; gap:8px; padding: 10px 14px; border-radius: 999px;
+    background: var(--panel); border:1px solid var(--line); cursor:pointer; font-size:13.5px; font-weight:700;
+    color: var(--ink-dim);
+  }
+  .tab .dot{ width:8px; height:8px; border-radius:50%; }
+  .tab[aria-selected="true"]{ color: var(--ink); border-color: color-mix(in srgb, var(--tabcolor) 55%, var(--line)); background: color-mix(in srgb, var(--tabcolor) 12%, var(--panel)); }
+  .tab:hover{ border-color: var(--ink-faint); }
+
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+  .panel[data-channel="health"]{ --accent: var(--ch-health); --accent-ink: #08210f; }
+  .panel[data-channel="speak"]{ --accent: var(--ch-speak); --accent-ink: var(--amber-ink); }
+  .panel[data-channel="clone"]{ --accent: var(--ch-clone); --accent-ink: var(--violet-ink); }
+  .panel[data-channel="continue"]{ --accent: var(--ch-continue); --accent-ink: var(--cyan-ink); }
+
+  .panel-head{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
+  .panel-head h2{ margin:0; font-size:18px; font-weight:800; letter-spacing:-.005em; }
+  .panel-head p{ margin:4px 0 0; font-size:13px; color: var(--ink-dim); max-width: 560px; }
+
+  .btn{ border:0; border-radius: var(--radius-sm); padding: 10px 16px; font-weight:800; font-size:13px; letter-spacing:.02em; cursor:pointer; text-transform:uppercase; }
+  .btn.primary{ background: var(--accent, var(--cyan)); color: var(--accent-ink, #06211f); }
+  .btn.primary:disabled{ opacity:.45; cursor:not-allowed; }
+  .btn.stop{ background: transparent; border:1px solid var(--red); color: var(--red); }
+  .btn.stop:disabled{ opacity:.35; cursor:not-allowed; border-color: var(--line); color: var(--ink-faint); }
+  .btn.ghost{ background: var(--panel-2); border:1px solid var(--line); color: var(--ink); text-transform:none; font-weight:700; font-size:12.5px; padding: 7px 12px; }
+  .btn.ghost:hover{ border-color: var(--ink-faint); }
+  .btn.small{ padding:6px 10px; font-size:11.5px; }
+
+  .test-grid{ display:grid; grid-template-columns: repeat(2, 1fr); gap:12px; }
+  @media (max-width: 720px){ .test-grid{ grid-template-columns: 1fr; } }
+  .test-card{ border:1px solid var(--line); border-radius: var(--radius); padding:14px; background: var(--panel-2); }
+  .test-card .row1{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .test-card .name{ display:flex; align-items:center; gap:8px; font-weight:800; font-size:13.5px; }
+  .test-card .route{ font-family: var(--font-mono); font-size:11px; color: var(--ink-faint); margin-top:2px; }
+  .test-card .statusline{ font-family: var(--font-mono); font-size:11.5px; color: var(--ink-dim); margin-top:8px; min-height: 15px; }
+  .test-card pre{ margin-top:8px; }
+  .runall{ display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .runall .summary{ font-family: var(--font-mono); font-size:12.5px; color: var(--ink-dim); }
+
+  pre.json{
+    background: #0d1014; border:1px solid var(--line-soft); border-top: 2px solid var(--accent, var(--cyan));
+    border-radius: var(--radius-sm); padding:10px; margin:0; max-height:220px; overflow:auto;
+    font-family: var(--font-mono); font-size:12px; color: var(--ink-dim); white-space:pre-wrap; word-break: break-word;
+  }
+  .jsonhead{ display:flex; align-items:center; justify-content:space-between; margin-top:8px; }
+  .jsonhead .lbl{ font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; color: var(--ink-faint); font-weight:700; }
+
+  .dropzone{
+    border:1.5px dashed var(--line); border-radius: var(--radius); padding: 20px; text-align:center; cursor:pointer;
+    background: var(--bg-soft); transition: border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone:focus-visible{ border-color: var(--accent); }
+  .dropzone.active{ border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--bg-soft)); }
+  .dropzone svg{ opacity:.7; }
+  .dropzone .dz-title{ font-weight:700; font-size:13.5px; margin-top:8px; }
+  .dropzone .dz-sub{ font-size:11.5px; color: var(--ink-faint); margin-top:3px; }
+  .dz-fileinfo{ font-family: var(--font-mono); font-size:11.5px; color: var(--ink-dim); margin-top:8px; min-height:14px; }
+  audio.preview{ width:100%; margin-top:10px; display:none; height:34px; }
+
+  .segmented{ display:flex; gap:6px; background: var(--bg-soft); border:1px solid var(--line); border-radius:999px; padding:3px; width:fit-content; }
+  .seg-opt{ position:relative; }
+  .seg-opt input{ position:absolute; opacity:0; inset:0; cursor:pointer; }
+  .seg-opt span{ display:block; padding:7px 14px; border-radius:999px; font-size:12.5px; font-weight:700; color: var(--ink-dim); }
+  .seg-opt input:checked + span{ background: var(--accent); color: var(--accent-ink); }
+  .seg-opt input:focus-visible + span{ outline: 2px solid var(--accent); outline-offset:2px; }
+
+  .subfields{ margin-top:14px; }
+  .subfields[hidden]{ display:none; }
+
+  .transport{ display:flex; align-items:center; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  .inline-error{ font-size:12.5px; color: var(--red); margin-top:10px; display:none; }
+
+  .runbox{ margin-top:18px; border:1px solid var(--line); border-radius: var(--radius); padding:14px; background: var(--panel-2); }
+  .stepper{ display:flex; align-items:center; }
+  .step{ display:flex; align-items:center; gap:8px; flex:1; }
+  .step:last-child{ flex:0; }
+  .step .dot{ width:10px; height:10px; border-radius:50%; background: var(--line-soft); flex:0 0 auto; position:relative; }
+  .step .dot.active{ background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); animation: ledpulse 1.1s ease-in-out infinite; }
+  .step .dot.done{ background: var(--accent); }
+  .step .dot.error, .step .dot.stopped{ background: var(--red); }
+  .step .dot.pending{ background: var(--line-soft); }
+  .step-label{ font-size:11px; font-family: var(--font-mono); color: var(--ink-faint); white-space:nowrap; }
+  .step:not(:last-child)::after{ content:""; height:1px; flex:1; background: var(--line-soft); margin: 0 4px; }
+
+  .meter-row{ display:flex; align-items:center; gap:14px; margin-top:14px; }
+  .meter{ display:flex; align-items:center; gap:2px; height:36px; flex:1; padding: 0 4px; background: #0d1014; border:1px solid var(--line-soft); border-radius: var(--radius-sm); }
+  .meter .bar{ flex:1; height:100%; background: var(--accent); opacity:.85; border-radius:2px; transform: scaleY(.06); transform-origin: center; }
+  .meter-stats{ display:flex; gap:14px; font-family: var(--font-mono); font-size:11.5px; color: var(--ink-dim); flex:0 0 auto; }
+  .meter-stats b{ color: var(--ink); }
+
+  .output{ margin-top:14px; }
+  audio.output-audio{ width:100%; display:none; height:38px; }
+  .dl-wrap{ margin-top:8px; display:none; }
+  .dl-wrap a{ font-size:12.5px; font-family: var(--font-mono); }
+
+  .log{
+    margin-top:10px; background:#0a0c0f; border:1px solid var(--line-soft); border-radius: var(--radius-sm);
+    padding:10px; max-height:170px; overflow:auto; font-family: var(--font-mono); font-size:11.5px; color: var(--ink-faint);
+    white-space:pre-wrap;
+  }
+
+  footer.note{ max-width:1180px; margin: 0 auto 30px; padding: 0 22px; font-size:11.5px; color: var(--ink-faint); position:relative; z-index:1; }
+
+  @media (max-width: 960px){
+    .shell{ grid-template-columns: 1fr; }
+    .topbar{ flex-wrap:wrap; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect x="1" y="1" width="38" height="38" rx="10" fill="#1b2027" stroke="#2a313b"/>
+      <g stroke="#52d9cd" stroke-width="2.4" stroke-linecap="round">
+        <line x1="9" y1="24" x2="9" y2="17"/>
+        <line x1="14" y1="27" x2="14" y2="12"/>
+        <line x1="19" y1="30" x2="19" y2="9"/>
+        <line x1="24" y1="25" x2="24" y2="15"/>
+        <line x1="29" y1="22" x2="29" y2="19"/>
+      </g>
+    </svg>
+    <div class="brand-text">
+      <span class="eyebrow">Local API test harness</span>
+      <h1>Higgs Signal Console</h1>
+    </div>
+  </div>
+  <div class="conn-status" id="connStatus">
+    <span class="led" id="connLed"></span>
+    <span id="connText">Checking connection…</span>
+  </div>
+</div>
+
+<div class="shell">
+
+  <!-- SIDEBAR -->
+  <aside>
+    <div class="card">
+      <h3 class="card-title">Connection</h3>
+
+      <label class="field-label" for="baseUrl">Base URL</label>
+      <input type="text" id="baseUrl" value="http://127.0.0.1:7077" autocomplete="off" spellcheck="false">
+      <p class="hint">Where the Higgs API server is listening.</p>
+
+      <label class="field-label" for="apiKey">API key</label>
+      <div class="keyrow">
+        <input type="password" id="apiKey" value="" autocomplete="off" spellcheck="false" placeholder="Paste your key — kept in this tab only">
+        <button class="iconbtn" id="toggleKey" type="button" title="Show key" aria-label="Show API key">👁</button>
+      </div>
+      <p class="hint">Sent as a Bearer token on every /v1 route. Nothing is saved — it's cleared on reload. Leave empty to test unauthenticated calls.</p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title">Transport</h3>
+      <div class="switch-row">
+        <div class="switch-copy">
+          <div class="t">Stream response</div>
+          <div class="d">Uses /v1/higgs/audio/stream and plays audio as chunks arrive</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="streamToggle" checked>
+          <span class="track"></span>
+          <span class="thumb"></span>
+        </label>
+      </div>
+
+      <details class="adv" open>
+        <summary>Generation parameters</summary>
+
+        <label class="field-label" for="paramModel">Model</label>
+        <div class="keyrow">
+          <input type="text" id="paramModel" value="current" list="modelList" autocomplete="off" spellcheck="false">
+          <button class="iconbtn" id="refreshModels" type="button" title="Detect local models" aria-label="Detect local models">↻</button>
+        </div>
+        <datalist id="modelList"></datalist>
+        <p class="hint" id="modelHint">Folder name of a detected model, or "current".</p>
+
+        <label class="field-label" for="paramFormat">Response format</label>
+        <select id="paramFormat">
+          <option value="wav" selected>wav</option>
+          <option value="mp3">mp3</option>
+        </select>
+        <p class="hint">Applies to the finished-file routes. Streaming always plays back as WAV chunks.</p>
+
+        <div class="grid2">
+          <div>
+            <label class="field-label" for="paramMaxTokens">Max tokens</label>
+            <input type="number" id="paramMaxTokens" value="1024" min="64" step="64">
+          </div>
+          <div>
+            <label class="field-label" for="paramTemperature">Temperature</label>
+            <input type="number" id="paramTemperature" value="0.85" min="0" max="2" step="0.05">
+          </div>
+        </div>
+        <div class="grid2">
+          <div>
+            <label class="field-label" for="paramTopP">Top P</label>
+            <input type="number" id="paramTopP" value="0.95" min="0" max="1" step="0.05">
+          </div>
+          <div>
+            <label class="field-label" for="paramTopK">Top K</label>
+            <input type="number" id="paramTopK" value="50" min="0" step="1">
+          </div>
+        </div>
+
+        <label class="field-label" for="paramSeed">Seed</label>
+        <div class="seedrow">
+          <input type="number" id="paramSeed" value="1234" step="1">
+          <button class="iconbtn" id="randomSeed" type="button" title="Randomize seed" aria-label="Randomize seed">🎲</button>
+        </div>
+      </details>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main>
+    <div class="tablist" role="tablist" aria-label="Test sections">
+      <button class="tab" id="tabbtn-health" role="tab" aria-selected="true" aria-controls="panel-health" style="--tabcolor: var(--ch-health);"><span class="dot" style="background:var(--ch-health);"></span>Health</button>
+      <button class="tab" id="tabbtn-speak" role="tab" aria-selected="false" aria-controls="panel-speak" style="--tabcolor: var(--ch-speak);"><span class="dot" style="background:var(--ch-speak);"></span>Speak</button>
+      <button class="tab" id="tabbtn-clone" role="tab" aria-selected="false" aria-controls="panel-clone" style="--tabcolor: var(--ch-clone);"><span class="dot" style="background:var(--ch-clone);"></span>Clone</button>
+      <button class="tab" id="tabbtn-continue" role="tab" aria-selected="false" aria-controls="panel-continue" style="--tabcolor: var(--ch-continue);"><span class="dot" style="background:var(--ch-continue);"></span>Continue</button>
+    </div>
+
+    <!-- HEALTH PANEL -->
+    <section class="panel active" id="panel-health" data-channel="health" role="tabpanel" aria-labelledby="tabbtn-health">
+      <div class="panel-head">
+        <div>
+          <h2>Health &amp; status</h2>
+          <p>Every read-only route in one place. Run them individually or all at once.</p>
+        </div>
+      </div>
+
+      <div class="runall">
+        <button class="btn primary" id="runAll">Run all checks</button>
+        <span class="summary" id="runAllSummary"></span>
+      </div>
+
+      <div class="test-grid">
+
+        <div class="test-card">
+          <div class="row1">
+            <span class="name"><span class="led" id="health-led"></span>Health check</span>
+            <button class="btn ghost small" id="health-run">Run</button>
+          </div>
+          <div class="route">GET /health · no auth</div>
+          <div class="statusline" id="health-status"></div>
+          <pre class="json" id="health-json"></pre>
+        </div>
+
+        <div class="test-card">
+          <div class="row1">
+            <span class="name"><span class="led" id="status-led"></span>Server status</span>
+            <button class="btn ghost small" id="status-run">Run</button>
+          </div>
+          <div class="route">GET /v1/status</div>
+          <div class="statusline" id="status-status"></div>
+          <pre class="json" id="status-json"></pre>
+        </div>
+
+        <div class="test-card">
+          <div class="row1">
+            <span class="name"><span class="led" id="models-led"></span>Detected models</span>
+            <button class="btn ghost small" id="models-run">Run</button>
+          </div>
+          <div class="route">GET /v1/models</div>
+          <div class="statusline" id="models-status"></div>
+          <pre class="json" id="models-json"></pre>
+        </div>
+
+        <div class="test-card">
+          <div class="row1">
+            <span class="name"><span class="led" id="speakers-led"></span>Saved speakers</span>
+            <button class="btn ghost small" id="speakers-run">Run</button>
+          </div>
+          <div class="route">GET /v1/higgs/speakers</div>
+          <div class="statusline" id="speakers-status"></div>
+          <pre class="json" id="speakers-json"></pre>
+        </div>
+
+        <div class="test-card">
+          <div class="row1">
+            <span class="name"><span class="led" id="cancel-led"></span>Cancel active job</span>
+            <button class="btn ghost small" id="cancel-run">Run</button>
+          </div>
+          <div class="route">POST /v1/higgs/cancel</div>
+          <div class="statusline" id="cancel-status"></div>
+          <pre class="json" id="cancel-json"></pre>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- SPEAK PANEL -->
+    <section class="panel" id="panel-speak" data-channel="speak" role="tabpanel" aria-labelledby="tabbtn-speak">
+      <div class="panel-head">
+        <div>
+          <h2>Text to speech</h2>
+          <p>Plain TTS with the model's default voice.</p>
+        </div>
+      </div>
+
+      <label class="field-label" for="speak-text">Text to speak</label>
+      <textarea id="speak-text">This is a plain text to speech test against the Higgs API, sent from a browser test console.</textarea>
+      <div class="inline-error" id="speak-error"></div>
+
+      <div class="transport">
+        <button class="btn primary" id="speak-run">Generate speech</button>
+        <button class="btn stop" id="speak-stop" disabled>Stop</button>
+      </div>
+
+      <div class="runbox">
+        <div class="stepper" id="speak-stepper"></div>
+        <div class="meter-row">
+          <div class="meter" id="speak-meter"></div>
+          <div class="meter-stats">
+            <span>Elapsed <b id="speak-timer">0.0s</b></span>
+            <span>Chunks <b id="speak-chunks">0</b></span>
+          </div>
+        </div>
+        <div class="output">
+          <audio class="output-audio" id="speak-audio" controls></audio>
+          <p class="dl-wrap" id="speak-dlwrap"><a id="speak-dl" download="speak-output.wav">Download output file</a></p>
+        </div>
+        <div class="log" id="speak-log"></div>
+      </div>
+    </section>
+
+    <!-- CLONE PANEL -->
+    <section class="panel" id="panel-clone" data-channel="clone" role="tabpanel" aria-labelledby="tabbtn-clone">
+      <div class="panel-head">
+        <div>
+          <h2>Voice clone</h2>
+          <p>Use saved <code>speaker:&lt;id&gt;</code> identities for normal browser cloning. Reference-file cloning only works when the API server can read the exact local file path; browser file selection is preview-only.</p>
+        </div>
+      </div>
+
+      <label class="field-label" for="clone-text">Text to speak</label>
+      <textarea id="clone-text">This sentence should come out in the cloned voice.</textarea>
+
+      <label class="field-label" id="clone-mode-label">Voice source</label>
+      <div class="segmented" role="radiogroup" aria-labelledby="clone-mode-label">
+        <label class="seg-opt"><input type="radio" name="cloneMode" value="speaker" checked><span>Saved speaker</span></label>
+        <label class="seg-opt"><input type="radio" name="cloneMode" value="ref"><span>Server file path</span></label>
+      </div>
+
+      <div class="subfields" id="clone-ref-fields" hidden>
+        <label class="field-label" id="clone-dz-label">Reference audio</label>
+        <div class="dropzone" id="clone-dropzone" tabindex="0" role="button" aria-labelledby="clone-dz-label">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0-12 4 4m-4-4-4 4M5 17v1a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-1" stroke="#96a3b0" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div class="dz-title">Preview a WAV, MP3, FLAC or M4A here</div>
+          <div class="dz-sub">This does not upload audio to the API — paste the real server-side path below.</div>
+          <input type="file" id="clone-file-input" accept="audio/*" class="skip">
+        </div>
+        <div class="dz-fileinfo" id="clone-fileinfo"></div>
+        <audio class="preview" id="clone-preview" controls></audio>
+
+        <label class="field-label" for="clone-path">Reference audio path (on the server)</label>
+        <input type="text" id="clone-path" placeholder="e.g. C:\voices\speaker.wav or /home/you/voices/speaker.wav" autocomplete="off" spellcheck="false">
+        <p class="hint warn" id="clone-path-hint">The API does not receive the selected file. Paste a full path that exists on the machine running the Higgs server, for example C:\voices\speaker.wav.</p>
+
+        <label class="field-label" for="clone-reftext">Reference transcript <span style="color:var(--ink-faint); font-weight:400;">(optional)</span></label>
+        <input type="text" id="clone-reftext" placeholder="What the reference audio says, if known" autocomplete="off">
+      </div>
+
+      <div class="subfields" id="clone-speaker-fields">
+        <label class="field-label" for="clone-speaker-select">Saved speaker</label>
+        <div class="keyrow">
+          <select id="clone-speaker-select"><option value="">No speakers loaded yet</option></select>
+          <button class="iconbtn" id="clone-refresh-speakers" type="button" title="Refresh saved speakers" aria-label="Refresh saved speakers">↻</button>
+        </div>
+        <p class="hint" id="clone-speaker-hint">Run "Saved speakers" on the Health tab, or refresh here, to list identities saved on the server.</p>
+      </div>
+
+      <div class="inline-error" id="clone-error"></div>
+
+      <div class="transport">
+        <button class="btn primary" id="clone-run">Generate clone</button>
+        <button class="btn stop" id="clone-stop" disabled>Stop</button>
+      </div>
+
+      <div class="runbox">
+        <div class="stepper" id="clone-stepper"></div>
+        <div class="meter-row">
+          <div class="meter" id="clone-meter"></div>
+          <div class="meter-stats">
+            <span>Elapsed <b id="clone-timer">0.0s</b></span>
+            <span>Chunks <b id="clone-chunks">0</b></span>
+          </div>
+        </div>
+        <div class="output">
+          <audio class="output-audio" id="clone-audio" controls></audio>
+          <p class="dl-wrap" id="clone-dlwrap"><a id="clone-dl" download="clone-output.wav">Download output file</a></p>
+        </div>
+        <div class="log" id="clone-log"></div>
+      </div>
+    </section>
+
+    <!-- CONTINUE PANEL -->
+    <section class="panel" id="panel-continue" data-channel="continue" role="tabpanel" aria-labelledby="tabbtn-continue">
+      <div class="panel-head">
+        <div>
+          <h2>Continue speech</h2>
+          <p>Extend an existing audio file, optionally steering it with new text.</p>
+        </div>
+      </div>
+
+      <label class="field-label" id="continue-dz-label">Source audio</label>
+      <div class="dropzone" id="continue-dropzone" tabindex="0" role="button" aria-labelledby="continue-dz-label">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v12m0-12 4 4m-4-4-4 4M5 17v1a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-1" stroke="#96a3b0" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="dz-title">Drop the audio to continue here</div>
+        <div class="dz-sub">or click to browse — used for local preview and to help fill in the path below</div>
+        <input type="file" id="continue-file-input" accept="audio/*" class="skip">
+      </div>
+      <div class="dz-fileinfo" id="continue-fileinfo"></div>
+      <audio class="preview" id="continue-preview" controls></audio>
+
+      <label class="field-label" for="continue-path">Source audio path (on the server)</label>
+      <input type="text" id="continue-path" placeholder="e.g. C:\voices\start.wav or /home/you/voices/start.wav" autocomplete="off" spellcheck="false">
+      <p class="hint">Browsers can't read a dropped file's real location, so the API needs this typed in — it's the path on the machine running the server.</p>
+
+      <label class="field-label" for="continue-text">Continuation text <span style="color:var(--ink-faint); font-weight:400;">(optional)</span></label>
+      <textarea id="continue-text">and this is the continuation.</textarea>
+
+      <div class="inline-error" id="continue-error"></div>
+
+      <div class="transport">
+        <button class="btn primary" id="continue-run">Generate continuation</button>
+        <button class="btn stop" id="continue-stop" disabled>Stop</button>
+      </div>
+
+      <div class="runbox">
+        <div class="stepper" id="continue-stepper"></div>
+        <div class="meter-row">
+          <div class="meter" id="continue-meter"></div>
+          <div class="meter-stats">
+            <span>Elapsed <b id="continue-timer">0.0s</b></span>
+            <span>Chunks <b id="continue-chunks">0</b></span>
+          </div>
+        </div>
+        <div class="output">
+          <audio class="output-audio" id="continue-audio" controls></audio>
+          <p class="dl-wrap" id="continue-dlwrap"><a id="continue-dl" download="continue-output.wav">Download output file</a></p>
+        </div>
+        <div class="log" id="continue-log"></div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="note">Runs entirely in this tab — requests go straight from your browser to the base URL above. If a call fails with a network error, confirm the server is running and sends CORS headers (Access-Control-Allow-Origin / -Headers / -Methods) for browser requests.</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- generic helpers ---------- */
+  function $(id){ return document.getElementById(id); }
+
+  var launchParams = new URLSearchParams(window.location.search);
+  var launchBaseUrl = launchParams.get('baseUrl');
+  if (launchBaseUrl) $('baseUrl').value = launchBaseUrl;
+
+  function baseUrl(){
+    var v = $('baseUrl').value.trim();
+    return v.replace(/\/+$/, '');
+  }
+
+  function authHeaders(){
+    var k = $('apiKey').value.trim();
+    return k ? { "Authorization": "Bearer " + k } : {};
+  }
+
+  function fmtBytes(n){
+    if (n < 1024) return n + ' B';
+    if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    return (n/(1024*1024)).toFixed(1) + ' MB';
+  }
+
+  function fmtElapsed(ms){ return (ms/1000).toFixed(1) + 's'; }
+
+  function base64ToArrayBuffer(base64){
+    var binary = atob(base64);
+    var bytes = new Uint8Array(binary.length);
+    for (var i=0; i<binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function fetchWithTimeout(url, opts, ms){
+    opts = opts || {};
+    if (opts.signal) return fetch(url, opts);
+    var ctrl = new AbortController();
+    var id = setTimeout(function(){ ctrl.abort(); }, ms || 15000);
+    var merged = Object.assign({}, opts, { signal: ctrl.signal });
+    return fetch(url, merged).finally(function(){ clearTimeout(id); });
+  }
+
+  function parseBody(res){
+    return res.text().then(function(text){
+      try { return JSON.parse(text); } catch(e){ return text; }
+    });
+  }
+
+  function extractList(data){
+    if (Array.isArray(data)) return data;
+    if (data && typeof data === 'object'){
+      if (Array.isArray(data.speakers)) return data.speakers;
+      if (Array.isArray(data.models)) return data.models;
+      if (Array.isArray(data.data)) return data.data;
+      if (Array.isArray(data.items)) return data.items;
+      if (Array.isArray(data.result)) return data.result;
+    }
+    return [];
+  }
+
+  function labelFor(item){
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object'){
+      return item.name || item.label || item.id || item.speaker_id || item.speakerId || item.folder || JSON.stringify(item);
+    }
+    return String(item);
+  }
+
+  function idFor(item){
+    if (typeof item === 'string') return item;
+    if (item && typeof item === 'object'){
+      return item.id || item.speaker_id || item.speakerId || item.name || item.folder || labelFor(item);
+    }
+    return String(item);
+  }
+
+  function normalizeSpeaker(raw){
+    var v = (raw || '').trim();
+    if (!v) return '';
+    return v.indexOf('speaker:') === 0 ? v : 'speaker:' + v;
+  }
+
+  function copyText(text, btn){
+    var restore = btn.textContent;
+    function done(ok){
+      btn.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(function(){ btn.textContent = restore; }, 1400);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){ done(true); }, function(){ done(false); });
+    } else {
+      done(false);
+    }
+  }
+
+  function networkHint(err){
+    if (err && err.name === 'AbortError') return 'Stopped.';
+    return "Couldn't reach " + baseUrl() + ". Confirm the server is running and, for browser calls, that it sends Access-Control-Allow-Origin / -Headers / -Methods.";
+  }
+
+  /* ---------- shared generation parameters ---------- */
+  function buildParams(){
+    return {
+      model: $('paramModel').value.trim() || 'current',
+      response_format: $('paramFormat').value,
+      max_tokens: Number($('paramMaxTokens').value) || 1024,
+      temperature: Number($('paramTemperature').value),
+      top_p: Number($('paramTopP').value),
+      top_k: Number($('paramTopK').value),
+      seed: Number($('paramSeed').value)
+    };
+  }
+
+  function streamingOn(){ return $('streamToggle').checked; }
+
+  /* ---------- api key show/hide ---------- */
+  $('toggleKey').addEventListener('click', function(){
+    var input = $('apiKey');
+    var showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    this.textContent = showing ? '👁' : '🙈';
+    this.setAttribute('aria-label', showing ? 'Show API key' : 'Hide API key');
+  });
+
+  $('randomSeed').addEventListener('click', function(){
+    $('paramSeed').value = Math.floor(Math.random() * 1000000);
+  });
+
+  /* ---------- connection LED (best-effort ping) ---------- */
+  function pingHealth(){
+    var led = $('connLed'), text = $('connText');
+    led.className = 'led running';
+    text.textContent = 'Checking connection…';
+    fetchWithTimeout(baseUrl() + '/health', {}, 5000).then(function(res){
+      if (res.ok){ led.className = 'led ok'; text.textContent = 'Server online at ' + baseUrl(); }
+      else { led.className = 'led fail'; text.textContent = 'Server responded with ' + res.status; }
+    }).catch(function(){
+      led.className = 'led fail';
+      text.textContent = 'Server offline or unreachable';
+    });
+  }
+  pingHealth();
+  $('baseUrl').addEventListener('change', pingHealth);
+
+  /* ---------- tabs ---------- */
+  var tabs = ['health','speak','clone','continue'];
+  function selectTab(name){
+    tabs.forEach(function(t){
+      $('tabbtn-' + t).setAttribute('aria-selected', String(t === name));
+      $('panel-' + t).classList.toggle('active', t === name);
+    });
+  }
+  tabs.forEach(function(t){
+    $('tabbtn-' + t).addEventListener('click', function(){ selectTab(t); });
+  });
+
+  /* ---------- stepper component ---------- */
+  function makeStepper(container, stages){
+    container.innerHTML = '';
+    var nodes = stages.map(function(s){
+      var wrap = document.createElement('div'); wrap.className = 'step';
+      var dot = document.createElement('span'); dot.className = 'dot pending';
+      var label = document.createElement('span'); label.className = 'step-label'; label.textContent = s.label;
+      wrap.appendChild(dot); wrap.appendChild(label);
+      container.appendChild(wrap);
+      return { dot: dot, key: s.key };
+    });
+    var currentIndex = -1;
+    return {
+      reset: function(){
+        currentIndex = -1;
+        nodes.forEach(function(n){ n.dot.className = 'dot pending'; });
+      },
+      setStage: function(key){
+        var idx = -1;
+        for (var i=0;i<nodes.length;i++){ if (nodes[i].key === key){ idx = i; break; } }
+        if (idx < 0) return;
+        currentIndex = idx;
+        nodes.forEach(function(n, i){
+          n.dot.className = 'dot ' + (i < idx ? 'done' : (i === idx ? 'active' : 'pending'));
+        });
+      },
+      setError: function(){
+        nodes.forEach(function(n, i){ n.dot.className = 'dot ' + (i <= currentIndex ? 'error' : 'pending'); });
+      },
+      setStopped: function(){
+        nodes.forEach(function(n, i){ n.dot.className = 'dot ' + (i <= currentIndex ? 'stopped' : 'pending'); });
+      }
+    };
+  }
+
+  var STREAM_STAGES = [
+    { key: 'queued', label: 'Queued' },
+    { key: 'start', label: 'Started' },
+    { key: 'audio', label: 'Generating' },
+    { key: 'final', label: 'Finalizing' },
+    { key: 'done', label: 'Done' }
+  ];
+  var DIRECT_STAGES = [
+    { key: 'sending', label: 'Sending' },
+    { key: 'waiting', label: 'Waiting' },
+    { key: 'done', label: 'Received' }
+  ];
+
+  /* ---------- meter component ---------- */
+  function makeMeter(container, count){
+    container.innerHTML = '';
+    var bars = [];
+    for (var i=0; i<(count || 18); i++){
+      var b = document.createElement('span'); b.className = 'bar';
+      container.appendChild(b);
+      bars.push({ el: b, energy: 0.02 + Math.random()*0.03 });
+    }
+    var running = false, raf = null, t = 0;
+
+    function frame(){
+      t += 0.05;
+      bars.forEach(function(b, i){
+        b.energy *= 0.9;
+        var ambient = running ? 0 : (Math.sin(t*0.8 + i*0.4) * 0.5 + 0.5) * 0.05;
+        var h = Math.max(0.06, Math.min(1, 0.05 + b.energy + ambient));
+        b.el.style.transform = 'scaleY(' + h.toFixed(3) + ')';
+      });
+      raf = requestAnimationFrame(frame);
+    }
+
+    if (!reduceMotion){ frame(); }
+    else { bars.forEach(function(b){ b.el.style.transform = 'scaleY(0.12)'; }); }
+
+    return {
+      spike: function(){
+        if (reduceMotion) return;
+        bars.forEach(function(b){ if (Math.random() < 0.6) b.energy = Math.min(1, b.energy + 0.3 + Math.random()*0.5); });
+      },
+      setRunning: function(v){ running = v; },
+      destroy: function(){ if (raf) cancelAnimationFrame(raf); }
+    };
+  }
+
+  /* ---------- shared streaming audio player ---------- */
+  var StreamPlayer = (function(){
+    var audioCtx = null, nextPlayTime = 0, sources = [];
+    function ensureCtx(){
+      if (!audioCtx || audioCtx.state === 'closed'){
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      var p = audioCtx.state !== 'running' ? audioCtx.resume() : Promise.resolve();
+      return p.then(function(){
+        if (!nextPlayTime || nextPlayTime < audioCtx.currentTime) nextPlayTime = audioCtx.currentTime + 0.08;
+      });
+    }
+    return {
+      reset: function(){ nextPlayTime = 0; },
+      play: function(wavBase64){
+        return ensureCtx().then(function(){
+          var buf = base64ToArrayBuffer(wavBase64);
+          return audioCtx.decodeAudioData(buf.slice(0)).then(function(decoded){
+            var src = audioCtx.createBufferSource();
+            src.buffer = decoded;
+            src.connect(audioCtx.destination);
+            src.onended = function(){ sources = sources.filter(function(s){ return s !== src; }); };
+            sources.push(src);
+            var now = audioCtx.currentTime;
+            if (nextPlayTime < now) nextPlayTime = now + 0.08;
+            src.start(nextPlayTime);
+            nextPlayTime += decoded.duration;
+          });
+        });
+      },
+      stopAll: function(){
+        sources.forEach(function(s){ try{ s.stop(); }catch(e){} });
+        sources = [];
+        nextPlayTime = 0;
+      }
+    };
+  })();
+
+  /* ---------- NDJSON stream reader ---------- */
+  function readNDJSON(response, onEvent){
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+
+    function handleLine(line){
+      if (!line.trim()) return Promise.resolve();
+      var evt;
+      try { evt = JSON.parse(line); }
+      catch(e){ return Promise.reject(new Error('Invalid NDJSON event: ' + line.slice(0, 160))); }
+      return Promise.resolve(onEvent(evt));
+    }
+
+    function pump(){
+      return reader.read().then(function(result){
+        if (result.done){
+          buffer += decoder.decode();
+          return handleLine(buffer);
+        }
+        buffer += decoder.decode(result.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop();
+        var chain = Promise.resolve();
+        lines.forEach(function(line){
+          chain = chain.then(function(){ return handleLine(line); });
+        });
+        return chain.then(pump);
+      });
+    }
+    return pump();
+  }
+
+  /* ---------- panel runtime helper ---------- */
+  function Panel(key){
+    var self = this;
+    this.key = key;
+    this.run = $(key + '-run');
+    this.stop = $(key + '-stop');
+    this.stepper = makeStepper($(key + '-stepper'), STREAM_STAGES);
+    this.meter = makeMeter($(key + '-meter'));
+    this.timerEl = $(key + '-timer');
+    this.chunkEl = $(key + '-chunks');
+    this.logEl = $(key + '-log');
+    this.errorEl = $(key + '-error');
+    this.audioEl = $(key + '-audio');
+    this.dlWrap = $(key + '-dlwrap');
+    this.dlLink = $(key + '-dl');
+    this.ctrl = null;
+    this.timerHandle = null;
+    this.chunkCount = 0;
+    this.outputUrl = null;
+
+    this.stop.addEventListener('click', function(){ self.abort(); });
+  }
+  Panel.prototype.log = function(msg){
+    var t = new Date().toLocaleTimeString();
+    this.logEl.textContent += '[' + t + '] ' + msg + '\n';
+    this.logEl.scrollTop = this.logEl.scrollHeight;
+  };
+  Panel.prototype.showError = function(msg){
+    this.errorEl.textContent = msg || '';
+    this.errorEl.style.display = msg ? 'block' : 'none';
+  };
+  Panel.prototype.startTimer = function(){
+    var self = this, t0 = performance.now();
+    this.timerHandle = setInterval(function(){ self.timerEl.textContent = fmtElapsed(performance.now() - t0); }, 100);
+  };
+  Panel.prototype.stopTimer = function(){ clearInterval(this.timerHandle); };
+  Panel.prototype.begin = function(useStream){
+    if (this.outputUrl){
+      URL.revokeObjectURL(this.outputUrl);
+      this.outputUrl = null;
+    }
+    this.logEl.textContent = '';
+    this.chunkCount = 0;
+    this.chunkEl.textContent = '0';
+    this.timerEl.textContent = '0.0s';
+    this.audioEl.style.display = 'none';
+    this.audioEl.removeAttribute('src');
+    this.dlWrap.style.display = 'none';
+    this.showError('');
+    this.stepper.reset();
+    if (!useStream){
+      this.stepper = makeStepper($(this.key + '-stepper'), DIRECT_STAGES);
+    } else {
+      this.stepper = makeStepper($(this.key + '-stepper'), STREAM_STAGES);
+    }
+    this.meter.setRunning(true);
+    this.run.disabled = true;
+    this.stop.disabled = false;
+    this.startTimer();
+  };
+  Panel.prototype.finish = function(){
+    this.meter.setRunning(false);
+    this.run.disabled = false;
+    this.stop.disabled = true;
+    this.stopTimer();
+    this.ctrl = null;
+  };
+  Panel.prototype.abort = function(){
+    if (this.ctrl){ this.ctrl.abort(); }
+    StreamPlayer.stopAll();
+    this.stepper.setStopped();
+    this.log('Stopped by user.');
+    var self = this;
+    fetchWithTimeout(baseUrl() + '/v1/higgs/cancel', { method: 'POST', headers: authHeaders() }, 6000).catch(function(){});
+    this.finish();
+  };
+  Panel.prototype.showOutput = function(blob, format){
+    if (this.outputUrl) URL.revokeObjectURL(this.outputUrl);
+    var url = URL.createObjectURL(blob);
+    this.outputUrl = url;
+    this.audioEl.src = url;
+    this.audioEl.style.display = 'block';
+    var ext = (format === 'mp3') ? 'mp3' : 'wav';
+    this.dlLink.href = url;
+    this.dlLink.download = this.key + '-output.' + ext;
+    this.dlWrap.style.display = 'block';
+  };
+
+  var panels = { speak: new Panel('speak'), clone: new Panel('clone'), continue: new Panel('continue') };
+
+  /* ---------- direct (finished-file) request ---------- */
+  function runDirect(panel, url, payload){
+    panel.begin(false);
+    panel.stepper.setStage('sending');
+    panel.log('POST ' + url);
+    panel.ctrl = new AbortController();
+    var t0 = performance.now();
+
+    return fetch(url, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+      signal: panel.ctrl.signal
+    }).then(function(res){
+      panel.stepper.setStage('waiting');
+      if (!res.ok){
+        return parseBody(res).then(function(body){
+          panel.stepper.setError();
+          var msg = typeof body === 'string' ? body : JSON.stringify(body);
+          panel.showError('Server returned ' + res.status + '. ' + (msg ? msg.slice(0, 300) : ''));
+          panel.log('HTTP ' + res.status + ': ' + msg);
+        });
+      }
+      return res.blob().then(function(blob){
+        var dt = Math.round(performance.now() - t0);
+        panel.stepper.setStage('done');
+        panel.log('Received ' + fmtBytes(blob.size) + ' in ' + dt + 'ms.');
+        panel.showOutput(blob, payload.response_format);
+      });
+    }).catch(function(err){
+      if (err.name === 'AbortError') return;
+      panel.stepper.setError();
+      panel.showError(networkHint(err));
+      panel.log('Failed: ' + String(err.message || err));
+    }).finally(function(){ panel.finish(); });
+  }
+
+  /* ---------- streaming request ---------- */
+  function runStream(panel, url, payload){
+    panel.begin(true);
+    StreamPlayer.reset();
+    panel.log('POST ' + url + ' (stream)');
+    panel.ctrl = new AbortController();
+
+    return fetch(url, {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+      body: JSON.stringify(payload),
+      signal: panel.ctrl.signal
+    }).then(function(res){
+      if (!res.ok){
+        return parseBody(res).then(function(body){
+          panel.stepper.setError();
+          var msg = typeof body === 'string' ? body : JSON.stringify(body);
+          panel.showError('Server returned ' + res.status + '. ' + (msg ? msg.slice(0, 300) : ''));
+          panel.log('HTTP ' + res.status + ': ' + msg);
+        });
+      }
+      panel.log('Connected. Waiting for events…');
+      return readNDJSON(res, function(evt){
+        if (evt.event === 'queued'){
+          panel.stepper.setStage('queued'); panel.log('Queued…');
+        } else if (evt.event === 'start'){
+          panel.stepper.setStage('start'); panel.log('Started…');
+        } else if (evt.event === 'progress'){
+          var progress = evt.total > 1 ? evt.current + ' / ' + evt.total : evt.phase;
+          panel.log((evt.phase || 'Progress') + ' · ' + progress);
+        } else if (evt.event === 'audio'){
+          panel.chunkCount += 1;
+          panel.chunkEl.textContent = String(panel.chunkCount);
+          panel.stepper.setStage('audio');
+          panel.meter.spike();
+          panel.log('Chunk ' + panel.chunkCount + ' — playing.');
+          return StreamPlayer.play(evt.wavBase64).catch(function(e){ panel.log('Chunk decode error: ' + e.message); });
+        } else if (evt.event === 'final'){
+          panel.stepper.setStage('final');
+          panel.log('Final file received.');
+          try {
+            var finalFormat = evt.mp3Base64 ? 'mp3' : 'wav';
+            var finalBase64 = evt.mp3Base64 || evt.wavBase64;
+            if (!finalBase64) throw new Error('final event did not contain audio');
+            var buf = base64ToArrayBuffer(finalBase64);
+            var mime = finalFormat === 'mp3' ? 'audio/mpeg' : 'audio/wav';
+            panel.showOutput(new Blob([buf], { type: mime }), finalFormat);
+          } catch(e){ panel.log('Could not decode final file: ' + e.message); }
+        } else if (evt.event === 'done'){
+          panel.stepper.setStage('done'); panel.log('Stream complete.');
+        } else if (evt.event === 'error'){
+          panel.stepper.setError();
+          var m = evt.message || (evt.error && evt.error.message) || JSON.stringify(evt.error || evt);
+          panel.showError('The server reported an error: ' + m);
+          panel.log('Server error: ' + JSON.stringify(evt));
+        } else {
+          panel.log(JSON.stringify(evt));
+        }
+      });
+    }).catch(function(err){
+      if (err.name === 'AbortError') return;
+      panel.stepper.setError();
+      panel.showError(networkHint(err));
+      panel.log('Failed: ' + String(err.message || err));
+    }).finally(function(){ panel.finish(); });
+  }
+
+  /* ---------- SPEAK ---------- */
+  $('speak-run').addEventListener('click', function(){
+    var panel = panels.speak;
+    var text = $('speak-text').value.trim();
+    if (!text){ panel.showError('Enter some text to speak.'); return; }
+    var payload = Object.assign(buildParams(), { input: text, voice: 'default' });
+    if (streamingOn()){
+      runStream(panel, baseUrl() + '/v1/higgs/audio/stream', payload);
+    } else {
+      runDirect(panel, baseUrl() + '/v1/audio/speech', payload);
+    }
+  });
+
+  /* ---------- CLONE ---------- */
+  var cloneModeRadios = document.querySelectorAll('input[name="cloneMode"]');
+  cloneModeRadios.forEach(function(r){
+    r.addEventListener('change', function(){
+      var mode = document.querySelector('input[name="cloneMode"]:checked').value;
+      $('clone-ref-fields').hidden = mode !== 'ref';
+      $('clone-speaker-fields').hidden = mode !== 'speaker';
+    });
+  });
+
+  $('clone-run').addEventListener('click', function(){
+    var panel = panels.clone;
+    var text = $('clone-text').value.trim();
+    if (!text){ panel.showError('Enter some text to speak.'); return; }
+    var mode = document.querySelector('input[name="cloneMode"]:checked').value;
+    var payload = Object.assign(buildParams(), { input: text });
+    var directUrl, streamUrl = baseUrl() + '/v1/higgs/audio/stream';
+
+    if (mode === 'ref'){
+      var path = $('clone-path').value.trim();
+      if (!path){ panel.showError('Reference audio is not uploaded by the browser. Paste the full path to a file that already exists on the API server, e.g. C:\\voices\\speaker.wav.'); return; }
+      payload.reference_audio_path = path;
+      var refText = $('clone-reftext').value.trim();
+      if (refText) payload.reference_text = refText;
+      directUrl = baseUrl() + '/v1/higgs/voice-clone';
+    } else {
+      var sel = $('clone-speaker-select').value;
+      if (!sel){ panel.showError('Choose a saved speaker.'); return; }
+      payload.voice = normalizeSpeaker(sel);
+      directUrl = baseUrl() + '/v1/audio/speech';
+    }
+
+    if (streamingOn()){
+      runStream(panel, streamUrl, payload);
+    } else {
+      runDirect(panel, directUrl, payload);
+    }
+  });
+
+  $('clone-refresh-speakers').addEventListener('click', function(){ refreshSpeakers(); });
+
+  /* ---------- CONTINUE ---------- */
+  $('continue-run').addEventListener('click', function(){
+    var panel = panels.continue;
+    var path = $('continue-path').value.trim();
+    if (!path){ panel.showError('Enter the source audio path, or drop a file to help fill it in.'); return; }
+    var payload = Object.assign(buildParams(), { audio_path: path });
+    var contText = $('continue-text').value.trim();
+    if (contText) payload.continuation_text = contText;
+
+    if (streamingOn()){
+      runStream(panel, baseUrl() + '/v1/higgs/audio/stream', payload);
+    } else {
+      runDirect(panel, baseUrl() + '/v1/higgs/continue-speech', payload);
+    }
+  });
+
+  /* ---------- dropzones ---------- */
+  function setupDropzone(cfg){
+    var zone = $(cfg.zone), input = $(cfg.input), pathField = $(cfg.path),
+        preview = $(cfg.preview), info = $(cfg.info), hint = cfg.hint ? $(cfg.hint) : null;
+
+    function handleFile(file){
+      if (!file) return;
+      var url = URL.createObjectURL(file);
+      preview.src = url;
+      preview.style.display = 'block';
+      info.textContent = file.name + ' · ' + fmtBytes(file.size);
+
+      var maybePath = file.path; // non-standard; present only in some desktop/Electron contexts
+      if (maybePath){
+        pathField.value = maybePath;
+        if (hint) hint.textContent = 'Path auto-filled from the dropped file.';
+      } else {
+        // Normal browsers intentionally hide the real file path for security.
+        // Do not send a fake filename as reference_audio_path/audio_path; it will not exist
+        // from the API server's point of view. The selected file is preview-only.
+        if (hint) hint.textContent = "Browser file selection is preview-only. Paste the full path that exists on the API server, e.g. C:\\voices\\" + file.name + " or /home/you/voices/" + file.name + ".";
+      }
+    }
+
+    zone.addEventListener('click', function(){ input.click(); });
+    zone.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); input.click(); }
+    });
+    input.addEventListener('change', function(e){ handleFile(e.target.files[0]); });
+    ['dragenter','dragover'].forEach(function(ev){
+      zone.addEventListener(ev, function(e){ e.preventDefault(); zone.classList.add('active'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      zone.addEventListener(ev, function(e){ e.preventDefault(); zone.classList.remove('active'); });
+    });
+    zone.addEventListener('drop', function(e){
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      handleFile(file);
+    });
+  }
+
+  setupDropzone({ zone:'clone-dropzone', input:'clone-file-input', path:'clone-path', preview:'clone-preview', info:'clone-fileinfo', hint:'clone-path-hint' });
+  setupDropzone({ zone:'continue-dropzone', input:'continue-file-input', path:'continue-path', preview:'continue-preview', info:'continue-fileinfo' });
+
+  /* ---------- health tab tests ---------- */
+  function runTest(cfg){
+    var led = $(cfg.key + '-led'), status = $(cfg.key + '-status'), json = $(cfg.key + '-json');
+    led.className = 'led running';
+    status.textContent = 'Running…';
+    json.textContent = '';
+    var t0 = performance.now();
+
+    return fetchWithTimeout(baseUrl() + cfg.path, {
+      method: cfg.method || 'GET',
+      headers: cfg.auth ? authHeaders() : {}
+    }, 15000).then(function(res){
+      var dt = Math.round(performance.now() - t0);
+      return parseBody(res).then(function(data){
+        json.textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        led.className = 'led ' + (res.ok ? 'ok' : 'fail');
+        status.textContent = res.status + ' · ' + dt + 'ms';
+        return { ok: res.ok, data: data };
+      });
+    }).catch(function(err){
+      var dt = Math.round(performance.now() - t0);
+      led.className = 'led fail';
+      if (err.name === 'AbortError'){
+        status.textContent = 'Timed out · ' + dt + 'ms';
+        json.textContent = 'The request took too long and was cancelled.';
+      } else {
+        status.textContent = 'Failed · ' + dt + 'ms';
+        json.textContent = networkHint(err);
+      }
+      return { ok: false, data: null };
+    });
+  }
+
+  function populateModelList(data){
+    var list = extractList(data);
+    var dl = $('modelList');
+    dl.innerHTML = '';
+    list.forEach(function(item){
+      var opt = document.createElement('option');
+      opt.value = labelFor(item);
+      dl.appendChild(opt);
+    });
+    $('modelHint').textContent = list.length ? (list.length + ' model(s) detected — pick one from the suggestions.') : 'No models detected yet.';
+  }
+
+  function populateSpeakerSelect(data){
+    var list = extractList(data);
+    var sel = $('clone-speaker-select');
+    sel.innerHTML = '';
+    if (!list.length){
+      var opt = document.createElement('option');
+      opt.value = ''; opt.textContent = 'No saved speakers found';
+      sel.appendChild(opt);
+      $('clone-speaker-hint').textContent = 'No saved speakers found on the server yet.';
+      return;
+    }
+    var placeholder = document.createElement('option');
+    placeholder.value = ''; placeholder.textContent = 'Choose a saved speaker…';
+    sel.appendChild(placeholder);
+    list.forEach(function(item){
+      var opt = document.createElement('option');
+      opt.value = idFor(item);
+      opt.textContent = labelFor(item);
+      sel.appendChild(opt);
+    });
+    $('clone-speaker-hint').textContent = list.length + ' saved speaker(s) loaded.';
+  }
+
+  function refreshModels(){
+    runTest({ key: 'models', path: '/v1/models', auth: true }).then(function(r){
+      if (r.ok) populateModelList(r.data);
+    });
+  }
+  function refreshSpeakers(){
+    runTest({ key: 'speakers', path: '/v1/higgs/speakers', auth: true }).then(function(r){
+      if (r.ok) populateSpeakerSelect(r.data);
+    });
+  }
+
+  $('health-run').addEventListener('click', function(){ runTest({ key:'health', path:'/health', auth:false }); });
+  $('status-run').addEventListener('click', function(){ runTest({ key:'status', path:'/v1/status', auth:true }); });
+  $('models-run').addEventListener('click', refreshModels);
+  $('speakers-run').addEventListener('click', refreshSpeakers);
+  $('cancel-run').addEventListener('click', function(){ runTest({ key:'cancel', path:'/v1/higgs/cancel', auth:true, method:'POST' }); });
+  $('refreshModels').addEventListener('click', refreshModels);
+
+  $('runAll').addEventListener('click', function(){
+    $('runAllSummary').textContent = 'Running…';
+    var results = [];
+    runTest({ key:'health', path:'/health', auth:false }).then(function(r){
+      results.push(r.ok);
+      return runTest({ key:'status', path:'/v1/status', auth:true });
+    }).then(function(r){
+      results.push(r.ok);
+      return runTest({ key:'models', path:'/v1/models', auth:true });
+    }).then(function(r){
+      results.push(r.ok);
+      if (r.ok) populateModelList(r.data);
+      return runTest({ key:'speakers', path:'/v1/higgs/speakers', auth:true });
+    }).then(function(r){
+      results.push(r.ok);
+      if (r.ok) populateSpeakerSelect(r.data);
+      var passed = results.filter(Boolean).length;
+      $('runAllSummary').textContent = passed + '/' + results.length + ' checks passed';
+    });
+  });
+
+  /* ---------- copy buttons for JSON blocks ---------- */
+  document.querySelectorAll('pre.json').forEach(function(pre){
+    pre.addEventListener('dblclick', function(){ copyText(pre.textContent, pre); });
+    pre.title = 'Double-click to copy';
+  });
+
+})();
+</script>
+</body>
+</html>

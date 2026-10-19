@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{app_root_dir, user_models_root};
+use crate::storage;
 
 /// Сайдкар-CLI движка (Windows). Рядом лежат ggml*.dll — их подхватывает загрузчик
 /// из той же папки.
@@ -35,7 +35,7 @@ pub const MODEL_URL: &str = "https://huggingface.co/chenmozhijin/BSRoformer-GGUF
 
 /// Папка движка рядом с exe (сайдкар + ggml-DLL).
 pub fn engine_dir() -> PathBuf {
-    app_root_dir().join("resources").join("bsroformer")
+    storage::executable_dir().join("resources").join("bsroformer")
 }
 
 /// Кандидаты расположения сайдкар-exe: рядом с exe (портатив/бандл) и в дереве
@@ -63,7 +63,7 @@ pub fn engine_cli_path() -> Option<PathBuf> {
 
 /// Папка модели вокал-сепарации (портатив: models/bsroformer рядом с exe).
 pub fn model_dir() -> PathBuf {
-    user_models_root().join("bsroformer")
+    storage::models_root().join("bsroformer")
 }
 
 /// Кандидаты расположения GGUF-модели: штатная папка рядом с exe и дерево
