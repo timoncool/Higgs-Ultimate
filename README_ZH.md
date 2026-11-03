@@ -1,3 +1,6 @@
+> [!WARNING]
+> **本项目已不再开发。** 基于 Higgs Audio v3 的语音合成与声音克隆现已转移到 **[Speech Studio](https://github.com/timoncool/speech-studio)**。 这里汇集了最新的 AI 技术:基于 Higgs Audio v3、Fish Audio Drama 3、Qwen3-TTS 和 Supertonic 3 的文本转语音、声音克隆、按描述生成声音、有声书和播客,基于 Parakeet、Nemotron 和 CrisperWhisper 的语音识别与说话人区分,以及与 AI 智能体的语音对话。免费、离线,支持 Windows、macOS 和 Linux。
+
 # Higgs Audio v3 Studio
 
 [English README](README.md) | [Linux branch](https://github.com/Saganaki22/Higgs-Audio-v3-Studio/tree/linux)
