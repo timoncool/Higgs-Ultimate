@@ -1,3 +1,6 @@
+> [!WARNING]
+> **This project is no longer developed.** Speech synthesis and voice cloning on Higgs Audio v3 now live in **[Speech Studio](https://github.com/timoncool/speech-studio)**. It brings together the latest AI technology: text-to-speech with Higgs Audio v3, Fish Audio Drama 3, Qwen3-TTS and Supertonic 3, voice cloning, voice design from a description, audiobooks and podcasts, speech recognition with speaker separation on Parakeet, Nemotron and CrisperWhisper, and voice conversations with an AI agent. Free and offline, on Windows, macOS and Linux.
+
 # Higgs Audio v3 Studio
 
 ![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4)
